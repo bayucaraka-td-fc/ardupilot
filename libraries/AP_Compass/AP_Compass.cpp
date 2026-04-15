@@ -28,6 +28,7 @@
 #include "AP_Compass_IST8308.h"
 #include "AP_Compass_IST8310.h"
 #include "AP_Compass_LSM303D.h"
+#include "AP_Compass_LSM303DLHC.h"
 #include "AP_Compass_LSM9DS1.h"
 #include "AP_Compass_LIS3MDL.h"
 #include "AP_Compass_LIS2MDL.h"
@@ -1139,6 +1140,22 @@ void Compass::_probe_external_i2c_compasses(void)
     }
 #endif  // AP_COMPASS_KMC5843_INTERNAL_BUS_PROBING_ENABLED
 #endif  // AP_COMPASS_HMC5843_ENABLED
+
+#if AP_COMPASS_LSM303DLHC_ENABLED
+    // external i2c bus for LSM303DLHC
+    FOREACH_I2C_EXTERNAL(i) {
+        probe_i2c_dev(DRIVER_LSM303DLHC, AP_Compass_LSM303DLHC::probe_i2c, i, HAL_COMPASS_LSM303DLHC_I2C_ADDR, true, ROTATION_NONE);
+        RETURN_IF_NO_SPACE;
+    }
+
+#if HAL_I2C_INTERNAL_MASK
+    // internal i2c bus
+    FOREACH_I2C_INTERNAL(i) {
+        probe_i2c_dev(DRIVER_LSM303DLHC, AP_Compass_LSM303DLHC::probe_i2c, i, HAL_COMPASS_LSM303DLHC_I2C_ADDR, false, ROTATION_NONE);
+        RETURN_IF_NO_SPACE;
+    }
+#endif
+#endif  // AP_COMPASS_LSM303DLHC_ENABLED
 
 #if AP_COMPASS_QMC5883L_ENABLED
     //external i2c bus
