@@ -31,20 +31,18 @@ public:
     virtual ~AP_Compass_LSM303DLHC() {}
 
 private:
-    AP_Compass_LSM303DLHC(AP_HAL::OwnPtr<AP_HAL::Device> dev, bool force_external, enum Rotation rotation);
+    AP_Compass_LSM303DLHC(AP_HAL::OwnPtr<AP_HAL::Device> dev, bool force_external);
 
     bool init(enum Rotation rotation);
     bool _read_sample();
-    bool _data_ready();
     bool _hardware_init();
     void _update();
-    uint8_t _register_read(uint8_t reg);
-    void _register_write(uint8_t reg, uint8_t val);
-    void _register_modify(uint8_t reg, uint8_t clearbits, uint8_t setbits);
+    bool _register_read(uint8_t reg, uint8_t &val);
+    bool _register_write(uint8_t reg, uint8_t val);
+    bool _register_modify(uint8_t reg, uint8_t clearbits, uint8_t setbits);
 
     AP_HAL::OwnPtr<AP_HAL::Device> _dev;
     bool _force_external;
-    enum Rotation _rotation;
 
     int16_t _mag_x;
     int16_t _mag_y;

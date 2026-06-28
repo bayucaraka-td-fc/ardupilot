@@ -22,11 +22,9 @@
 #if AP_COMPASS_LSM303DLHC_ENABLED
 
 #include <utility>
-#include <stdio.h>
 
 #include <AP_Math/AP_Math.h>
 #include <AP_HAL/AP_HAL.h>
-#include <AP_HAL/utility/sparse-endian.h>
 
 extern const AP_HAL::HAL& hal;
 
@@ -50,6 +48,7 @@ extern const AP_HAL::HAL& hal;
 #define LSM303DLHC_MAG_IRC_REG_M    0x0C
 
 /* CRA_REG_M bits */
+#define LSM303DLHC_MAG_CRA_TEMP_EN       0x80
 #define LSM303DLHC_MAG_CRA_DO_0_75HZ    0x00
 #define LSM303DLHC_MAG_CRA_DO_1_5HZ     0x04
 #define LSM303DLHC_MAG_CRA_DO_3HZ       0x08
@@ -74,11 +73,23 @@ extern const AP_HAL::HAL& hal;
 /* SR_REG_M bits */
 #define LSM303DLHC_MAG_SR_DRDY          0x01
 
+/* Verification masks from datasheet field definitions */
+#define LSM303DLHC_MAG_CRA_VERIFY_MASK  0x9C
+#define LSM303DLHC_MAG_CRB_VERIFY_MASK  0xE0
+#define LSM303DLHC_MAG_MR_VERIFY_MASK   0x03
 
-AP_Compass_LSM303DLHC::AP_Compass_LSM303DLHC(AP_HAL::OwnPtr<AP_HAL::Device> dev, bool force_external, enum Rotation rotation)
+/* ID register values */
+#define LSM303DLHC_MAG_ID_A             0x48
+#define LSM303DLHC_MAG_ID_B             0x34
+#define LSM303DLHC_MAG_ID_C             0x33
+
+
+AP_Compass_LSM303DLHC::AP_Compass_LSM303DLHC(AP_HAL::OwnPtr<AP_HAL::Device> dev, bool force_external)
     : _dev(std::move(dev))
     , _force_external(force_external)
-    , _rotation(rotation)
+    , _mag_x(0)
+    , _mag_y(0)
+    , _mag_z(0)
     , _initialised(false)
 {
 }
@@ -97,7 +108,7 @@ AP_Compass_Backend *AP_Compass_LSM303DLHC::probe_i2c(AP_HAL::OwnPtr<AP_HAL::Devi
         return nullptr;
     }
 
-    AP_Compass_LSM303DLHC *sensor = NEW_NOTHROW AP_Compass_LSM303DLHC(std::move(dev), force_external, rotation);
+    AP_Compass_LSM303DLHC *sensor = NEW_NOTHROW AP_Compass_LSM303DLHC(std::move(dev), force_external);
     if (!sensor || !sensor->init(rotation)) {
         delete sensor;
         return nullptr;
@@ -106,47 +117,59 @@ AP_Compass_Backend *AP_Compass_LSM303DLHC::probe_i2c(AP_HAL::OwnPtr<AP_HAL::Devi
     return sensor;
 }
 
-uint8_t AP_Compass_LSM303DLHC::_register_read(uint8_t reg)
+bool AP_Compass_LSM303DLHC::_register_read(uint8_t reg, uint8_t &val)
+{
+    return _dev->read_registers(reg, &val, 1);
+}
+
+bool AP_Compass_LSM303DLHC::_register_write(uint8_t reg, uint8_t val)
+{
+    return _dev->write_register(reg, val);
+}
+
+bool AP_Compass_LSM303DLHC::_register_modify(uint8_t reg, uint8_t clearbits, uint8_t setbits)
 {
     uint8_t val = 0;
-    _dev->read_registers(reg, &val, 1);
-    return val;
-}
-
-void AP_Compass_LSM303DLHC::_register_write(uint8_t reg, uint8_t val)
-{
-    _dev->write_register(reg, val);
-}
-
-void AP_Compass_LSM303DLHC::_register_modify(uint8_t reg, uint8_t clearbits, uint8_t setbits)
-{
-    uint8_t val = _register_read(reg);
+    if (!_register_read(reg, val)) {
+        return false;
+    }
     val &= ~clearbits;
     val |= setbits;
-    _register_write(reg, val);
+    return _register_write(reg, val);
 }
 
 bool AP_Compass_LSM303DLHC::_hardware_init()
 {
-    _dev->get_semaphore()->take_blocking();
+    AP_HAL::Semaphore *bus_sem = _dev->get_semaphore();
+    if (bus_sem == nullptr) {
+        return false;
+    }
 
-    // initially run the bus at low speed
-    _dev->set_speed(AP_HAL::Device::SPEED_LOW);
+    bus_sem->take_blocking();
 
-    // Set CRA_REG_M: Temperature sensor enable (bit 7), Data output rate 75Hz (bits 4:2 = 0x18)
-    // 0x98 = 0b10011000 (TEMP_EN=1, DO=75Hz)
-    _register_write(LSM303DLHC_MAG_CRA_REG_M, 0x98);
-
-    // Set CRB_REG_M: Gain 1.3 Gauss (default/full scale) - 0x20
-    _register_write(LSM303DLHC_MAG_CRB_REG_M, LSM303DLHC_MAG_CRB_GN_1_3GA);
-
-    // Set MR_REG_M: Continuous conversion mode
-    _register_write(LSM303DLHC_MAG_MR_REG_M, LSM303DLHC_MAG_MR_CONTINUOUS);
+    uint8_t cra = 0;
+    uint8_t crb = 0;
+    uint8_t mode = 0;
+    bool success = _dev->set_speed(AP_HAL::Device::SPEED_LOW) &&
+                   _register_write(LSM303DLHC_MAG_CRA_REG_M, LSM303DLHC_MAG_CRA_TEMP_EN | LSM303DLHC_MAG_CRA_DO_75HZ) &&
+                   _register_write(LSM303DLHC_MAG_CRB_REG_M, LSM303DLHC_MAG_CRB_GN_1_3GA) &&
+                   _register_write(LSM303DLHC_MAG_MR_REG_M, LSM303DLHC_MAG_MR_CONTINUOUS) &&
+                   _register_read(LSM303DLHC_MAG_CRA_REG_M, cra) &&
+                   _register_read(LSM303DLHC_MAG_CRB_REG_M, crb) &&
+                   _register_read(LSM303DLHC_MAG_MR_REG_M, mode) &&
+                   (cra & LSM303DLHC_MAG_CRA_VERIFY_MASK) ==
+                       (LSM303DLHC_MAG_CRA_TEMP_EN | LSM303DLHC_MAG_CRA_DO_75HZ) &&
+                   (crb & LSM303DLHC_MAG_CRB_VERIFY_MASK) == LSM303DLHC_MAG_CRB_GN_1_3GA &&
+                   (mode & LSM303DLHC_MAG_MR_VERIFY_MASK) == LSM303DLHC_MAG_MR_CONTINUOUS;
 
     _dev->set_speed(AP_HAL::Device::SPEED_HIGH);
-    _dev->get_semaphore()->give();
+    bus_sem->give();
 
-    return true;
+    if (!success) {
+        DEV_PRINTF("LSM303DLHC: hardware init failed\n");
+    }
+
+    return success;
 }
 
 bool AP_Compass_LSM303DLHC::init(enum Rotation rotation)
@@ -155,22 +178,35 @@ bool AP_Compass_LSM303DLHC::init(enum Rotation rotation)
         return false;
     }
 
-    _dev->get_semaphore()->take_blocking();
-
-    // Test WHOAMI to verify device
-    uint8_t whoami = _register_read(LSM303DLHC_MAG_IRA_REG_M);
-    if (whoami != 0x48) {  // Expected value for LSM303DLHC
-        _dev->get_semaphore()->give();
-        return false;  // Sensor not found or not responding correctly
+    AP_HAL::Semaphore *bus_sem = _dev->get_semaphore();
+    if (bus_sem == nullptr) {
+        DEV_PRINTF("LSM303DLHC: missing bus semaphore\n");
+        return false;
     }
 
-    _dev->get_semaphore()->give();
+    // increase retries while probing/configuring the device
+    _dev->set_retries(10);
+
+    bus_sem->take_blocking();
+    uint8_t id_a = 0;
+    uint8_t id_b = 0;
+    uint8_t id_c = 0;
+    const bool id_read_ok = _register_read(LSM303DLHC_MAG_IRA_REG_M, id_a) &&
+                            _register_read(LSM303DLHC_MAG_IRB_REG_M, id_b) &&
+                            _register_read(LSM303DLHC_MAG_IRC_REG_M, id_c);
+    bus_sem->give();
+
+    if (!id_read_ok ||
+        id_a != LSM303DLHC_MAG_ID_A ||
+        id_b != LSM303DLHC_MAG_ID_B ||
+        id_c != LSM303DLHC_MAG_ID_C) {
+        DEV_PRINTF("LSM303DLHC: ID check failed (%u,%u,%u)\n", (unsigned)id_a, (unsigned)id_b, (unsigned)id_c);
+        return false;
+    }
 
     if (!_hardware_init()) {
         return false;
     }
-
-    _initialised = true;
 
     // Register compass instance with bus ID
     _dev->set_device_type(DEVTYPE_LSM303D);
@@ -183,24 +219,19 @@ bool AP_Compass_LSM303DLHC::init(enum Rotation rotation)
     // Set rotation
     set_rotation(rotation);
 
-    // Register periodic read callback at ~91Hz (11ms period)
-    _dev->register_periodic_callback(11000, FUNCTOR_BIND_MEMBER(&AP_Compass_LSM303DLHC::_update, void));
+    _initialised = true;
+
+    // lower retries for runtime sampling
+    _dev->set_retries(3);
+
+    // Register periodic read callback at 75Hz (13.333ms period)
+    _dev->register_periodic_callback(13333, FUNCTOR_BIND_MEMBER(&AP_Compass_LSM303DLHC::_update, void));
 
     return true;
 }
 
-bool AP_Compass_LSM303DLHC::_data_ready()
-{
-    uint8_t status = _register_read(LSM303DLHC_MAG_SR_REG_M);
-    return (status & LSM303DLHC_MAG_SR_DRDY) != 0;
-}
-
 bool AP_Compass_LSM303DLHC::_read_sample()
 {
-    if (!_data_ready()) {
-        return false;
-    }
-
     uint8_t buffer[6];
     if (!_dev->read_registers(LSM303DLHC_MAG_OUT_X_H_M, buffer, 6)) {
         return false;
@@ -221,6 +252,10 @@ bool AP_Compass_LSM303DLHC::_read_sample()
 
 void AP_Compass_LSM303DLHC::read()
 {
+    if (!_initialised) {
+        return;
+    }
+
     // Drain accumulated samples from periodic callback
     drain_accumulated_samples();
 }
@@ -240,9 +275,6 @@ void AP_Compass_LSM303DLHC::_update()
     Vector3f field(_mag_x / 1100.0f * 1000.0f,
                    _mag_y / 1100.0f * 1000.0f,
                    _mag_z / 980.0f * 1000.0f);
-
-    // Apply rotation before accumulating
-    field.rotate(_rotation);
 
     // Accumulate sample for averaging
     accumulate_sample(field, 10);
