@@ -1,0 +1,23 @@
+# Bayusuta-Periph Default Parameters
+
+# AP_Periph ID
+CAN_D1_PROTOCOL 1
+
+# Disable EKF and arming checks for peripheral (not usually needed on AP_Periph, but satisfying requirement)
+ARMING_CHECK 0
+
+# IPC Bridge on UART3 (SERIAL3)
+# MAVLink2 at 1.5Mbps to communicate with Main FC
+SERIAL3_PROTOCOL 2
+SERIAL3_BAUD 1500
+
+# GPS on UART1 (SERIAL1)
+SERIAL1_PROTOCOL 5
+SERIAL1_BAUD 115
+
+# Compass
+COMPASS_ENABLE 1
+COMPASS_AUTO_ROT 0
+
+# Baro
+BARO_ENABLE 1

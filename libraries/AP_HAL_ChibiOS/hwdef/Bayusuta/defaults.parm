@@ -1,0 +1,26 @@
+# Bayusuta Default Parameters
+
+# IPC Bridge on USART2 (SERIAL1)
+# MAVLink2 at 1.5Mbps to communicate with Bayusuta-Periph
+SERIAL1_PROTOCOL 2
+SERIAL1_BAUD 1500
+
+# RC Input on USART3 (SERIAL2)
+# TODO: [User Tweak] Adjust if RC input uses a different UART or protocol
+SERIAL2_PROTOCOL 23
+SERIAL2_BAUD 115
+
+# Battery Monitor 1 (Analog)
+# PC2_C and PC3_C
+BATT_MONITOR 4
+BATT_VOLT_PIN 18
+BATT_CURR_PIN 19
+# TODO: [User Tweak] Adjust these to your physical resistor network scaling
+BATT_VOLT_MULT 10.1
+BATT_AMP_PERVLT 17.0
+
+# PCA9685 PWM Driver
+# Currently attached to I2C2.
+# Note: Native PWM out is typically on TIM pins (e.g. TIM4 on PD12-PD15).
+# If using PCA9685 for LEDs or via custom Lua:
+# NTF_LED_TYPES might need enabling if used for notification.
