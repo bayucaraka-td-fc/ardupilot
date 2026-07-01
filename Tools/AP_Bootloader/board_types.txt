@@ -607,6 +607,10 @@ AP_HW_Accton_Godwit_GA1              7120
 AP_HW_Accton_Godwit_GFF4             7121
 AP_HW_Accton_Godwit_GFH7             7122
 
+# IDs 7150 reserved for Bayusuta
+AP_HW_Bayusuta                       7150
+AP_HW_Bayusuta-Periph                7151
+
 # please fill gaps in the above ranges rather than adding past ID #7199
 
 
