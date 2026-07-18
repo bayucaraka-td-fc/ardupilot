@@ -1,0 +1,122 @@
+# hw definition file for processing by chibios_hwdef.py
+# Bayusuta-Periph (NAVC), STM32F405RGT6
+# AP_Periph DroneCAN node: GPS + IIS2MDC compass + SHT31 temperature.
+# Feeds the Bayusuta H753 main autopilot over the board-internal CAN bus.
+# Schematic: Bayusuta.pdf (PHANTOM_V2_PLAN_A, respin: CAN on CAN1 PB8/PB9,
+# sensors on I2C2, LEDs on PC3-PC5)
+
+# MCU class and specific type
+MCU STM32F4xx STM32F405xx
+
+# board ID. See Tools/AP_Bootloader/board_types.txt
+APJ_BOARD_ID AP_HW_Bayusuta-Periph
+
+# setup build for a peripheral firmware
+env AP_PERIPH 1
+
+# crystal frequency (ABM8G 24 MHz HSE)
+OSCILLATOR_HZ 24000000
+
+FLASH_SIZE_KB 1024
+
+# bootloader starts firmware at 64k
+FLASH_RESERVE_START_KB 64
+
+# store parameters in flash sectors 2 and 3 (16k each)
+STORAGE_FLASH_PAGE 2
+define HAL_STORAGE_SIZE 15360
+
+define STM32_ST_USE_TIMER 5
+define CH_CFG_ST_RESOLUTION 32
+
+# no analog inputs on this node — fully disable the ADC driver
+define HAL_USE_ADC FALSE
+define STM32_ADC_USE_ADC1 FALSE
+define HAL_DISABLE_ADC_DRIVER TRUE
+
+# save flash and RAM
+define SERIAL_BUFFERS_SIZE 512
+define PORT_INT_REQUIRED_STACK 64
+define DMA_RESERVE_SIZE 0
+define HAL_DEVICE_THREAD_STACK 768
+
+# we setup a small defaults.parm
+define AP_PARAM_MAX_EMBEDDED_PARAM 256
+
+# keep ROMFS uncompressed as we don't have enough RAM
+# to uncompress the bootloader at runtime
+env ROMFS_UNCOMPRESSED True
+
+# debug console on the CH330N USB-serial converter
+STDOUT_SERIAL SD3
+STDOUT_BAUDRATE 57600
+
+# SWD debug header
+PA13 JTMS-SWDIO SWD
+PA14 JTCK-SWCLK SWD
+
+# ---------------- LEDs ----------------
+# LED_A (PC3) is the AP_Periph activity LED; PC4/PC5 spare, GPIO-controllable
+PC3 LED OUTPUT LOW
+define HAL_LED_ON 1
+PC4 LED_B OUTPUT LOW GPIO(1)
+PC5 LED_C OUTPUT LOW GPIO(2)
+
+# ---------------- CAN ----------------
+# CAN1 to the Bayusuta main autopilot (board-internal bus, SN65HVD230 pair;
+# transceiver Rs is strapped in hardware, no silent GPIO)
+PB8 CAN1_RX CAN1
+PB9 CAN1_TX CAN1
+
+# ---------------- serial ports ----------------
+# port0: USB (SLCAN/debug), port1: USART3 CH330N debug console,
+# port2: UART4 external connector (spare), port3: USART1 GPS
+SERIAL_ORDER OTG1 USART3 UART4 USART1
+
+PA11 OTG_FS_DM OTG1
+PA12 OTG_FS_DP OTG1
+
+PC10 USART3_TX USART3 SPEED_HIGH NODMA
+PC11 USART3_RX USART3 SPEED_HIGH NODMA
+
+PA0 UART4_TX UART4 SPEED_HIGH NODMA
+PA1 UART4_RX UART4 SPEED_HIGH NODMA
+
+PB6 USART1_TX USART1 SPEED_HIGH
+PB7 USART1_RX USART1 SPEED_HIGH
+
+# GPS support pins on the 7-pin GPS connector are left unconfigured:
+# PC12 GPS_PPS (no mainline PPS support), PC14 GPS_NRST, PC13 GPS_LNA_EN
+# (module-dependent; add GPIO lines here if the chosen GPS module needs them)
+
+# ---------------- I2C ----------------
+# I2C2: internal sensors (IIS2MDC compass 0x1E, SHT31 temperature 0x44)
+# I2C3: external connector
+I2C_ORDER I2C2 I2C3
+
+PB10 I2C2_SCL I2C2
+PB11 I2C2_SDA I2C2
+
+PA8 I2C3_SCL I2C3
+PC9 I2C3_SDA I2C3
+
+define HAL_I2C_INTERNAL_MASK 1
+define HAL_I2C_CLEAR_ON_TIMEOUT 0
+
+# ---------------- GPS ----------------
+define AP_PERIPH_GPS_ENABLED 1
+define GPS_MAX_RATE_MS 200
+define GPS_MAX_RECEIVERS 1
+define GPS_MAX_INSTANCES 1
+
+# ---------------- compass ----------------
+define AP_PERIPH_MAG_ENABLED 1
+define AP_COMPASS_IIS2MDC_ENABLED 1
+# TODO: rotation is a placeholder until PCB layout orientation is known
+COMPASS IIS2MDC I2C:0:0x1E false ROTATION_NONE
+define HAL_COMPASS_MAX_SENSORS 1
+# IIS2MDC INT/DRDY on PA7 is not used by the driver
+
+# ---------------- temperature (SHT31) ----------------
+define AP_PERIPH_DEVICE_TEMPERATURE_ENABLED 1
+define AP_TEMPERATURE_SENSOR_ENABLED 1

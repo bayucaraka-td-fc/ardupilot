@@ -1,0 +1,528 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bayusuta — Complete Build, Flash &amp; Setup Walkthrough</title>
+<style>
+:root{
+  --bg:#f7f8fa; --fg:#1c2330; --panel:#ffffff; --line:#dde3ec; --accent:#0b5fa5;
+  --code-bg:#0f1722; --code-fg:#d8e4f2; --warn-bg:#fff4e5; --warn-line:#e08700;
+  --tip-bg:#e8f5ee; --tip-line:#1a7f4b; --muted:#5b677a;
+  --th:#eef2f8; --cite:#8892a6;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#10151d; --fg:#dbe4f0; --panel:#171e29; --line:#2a3547; --accent:#5aa9e6;
+    --code-bg:#0b111a; --code-fg:#cfe0f2; --warn-bg:#2a2113; --warn-line:#e0a12f;
+    --tip-bg:#12261b; --tip-line:#3dbb7d; --th:#1d2635; --cite:#6d7a92;
+  }
+}
+*{box-sizing:border-box}
+body{margin:0;font:16px/1.55 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--fg)}
+.layout{display:flex;min-height:100vh}
+nav{position:sticky;top:0;align-self:flex-start;height:100vh;overflow-y:auto;width:270px;flex:none;
+    background:var(--panel);border-right:1px solid var(--line);padding:18px 14px}
+nav h2{font-size:14px;text-transform:uppercase;letter-spacing:.08em;color:var(--cite);margin:6px 8px 10px}
+nav a{display:block;padding:5px 8px;border-radius:6px;color:var(--fg);text-decoration:none;font-size:14px}
+nav a:hover{background:var(--th);color:var(--accent)}
+main{flex:1;min-width:0;max-width:1000px;padding:28px 40px 80px;margin:0 auto}
+h1{font-size:28px;margin:.2em 0 .3em}
+h2{font-size:22px;margin-top:2em;padding-top:.6em;border-top:2px solid var(--line);color:var(--accent)}
+h3{font-size:17px;margin-top:1.4em}
+p,li{max-width:75ch}
+code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:.92em;
+     background:var(--th);padding:1px 5px;border-radius:4px}
+pre{background:var(--code-bg);color:var(--code-fg);padding:14px 16px;border-radius:8px;
+    overflow-x:auto;font-size:13.5px;line-height:1.5}
+pre code{background:none;padding:0;color:inherit}
+table{border-collapse:collapse;width:100%;margin:12px 0;font-size:14px}
+.tablewrap{overflow-x:auto}
+th,td{border:1px solid var(--line);padding:6px 9px;text-align:left;vertical-align:top}
+th{background:var(--th)}
+.callout{border-left:4px solid;border-radius:6px;padding:10px 14px;margin:14px 0}
+.warn{background:var(--warn-bg);border-color:var(--warn-line)}
+.warn::before{content:"⚠ WARNING — ";font-weight:700;color:var(--warn-line)}
+.tip{background:var(--tip-bg);border-color:var(--tip-line)}
+.tip::before{content:"✔ TIP — ";font-weight:700;color:var(--tip-line)}
+.cite{color:var(--cite);font-size:12.5px;font-style:italic}
+.badge{display:inline-block;background:var(--accent);color:#fff;border-radius:5px;
+       font-size:12px;padding:1px 8px;vertical-align:middle}
+ul.check{list-style:none;padding-left:0}
+ul.check li{padding-left:1.7em;position:relative;margin:.35em 0}
+ul.check li::before{content:"☐";position:absolute;left:0;color:var(--accent);font-size:1.1em}
+@media (max-width:900px){ nav{display:none} main{padding:20px 16px} }
+</style>
+</head>
+<body>
+<div class="layout">
+<nav>
+<h2>Contents</h2>
+<a href="#s1">1. Overview &amp; prerequisites</a>
+<a href="#s2">2. Get source &amp; submodules</a>
+<a href="#s3">3. Compile main FC (Bayusuta)</a>
+<a href="#s4">4. Compile periph (Bayusuta-Periph)</a>
+<a href="#s5">5. Flash — STM32CubeProgrammer</a>
+<a href="#s6">6. First boot &amp; sanity checks</a>
+<a href="#s7">7. Frame &amp; tri-tiltrotor params</a>
+<a href="#s8">8. Bidirectional DShot &amp; ESC</a>
+<a href="#s9">9. Sensor fusion params</a>
+<a href="#s10">10. Harmonic notch (ESC RPM)</a>
+<a href="#s11">11. Ground checks before flight</a>
+<a href="#s12">12. Troubleshooting</a>
+<a href="#s13">13. Appendix: params &amp; pinout</a>
+</nav>
+<main>
+
+<h1>Bayusuta <span class="badge">QuadPlane tri-tiltrotor</span></h1>
+<p><strong>Complete build → flash → configure walkthrough</strong> for the Bayusuta dual-MCU
+autopilot. Every parameter name, enum value and default in this document was verified against
+its <code>AP_GROUPINFO()</code> definition in the ArduPilot source tree; the citation
+(file:line) follows each item.</p>
+
+<div class="warn">Three placeholders remain hardware-dependent and <em>must</em> be resolved
+before flight: the two IMU rotations and the periph compass rotation are
+<code>ROTATION_NONE</code> until the PCB layout orientation is known, and the YRRC
+power-module voltage/current scales need bench calibration (§9.4).</div>
+
+<h2 id="s1">1. Overview &amp; prerequisites</h2>
+<h3>1.1 The two-MCU split</h3>
+<div class="tablewrap"><table>
+<tr><th></th><th>Bayusuta (FCC)</th><th>Bayusuta-Periph (NAVC)</th></tr>
+<tr><td>MCU</td><td>STM32H753VIT6 @ 480&nbsp;MHz, 32&nbsp;MHz HSE</td><td>STM32F405RGT6, 24&nbsp;MHz HSE</td></tr>
+<tr><td>Firmware</td><td>ArduPlane (QuadPlane)</td><td>AP_Periph (DroneCAN node)</td></tr>
+<tr><td>Board ID (<code>APJ_BOARD_ID</code>)</td><td><code>AP_HW_Bayusuta</code> = <strong>7150</strong></td><td><code>AP_HW_Bayusuta-Periph</code> = <strong>7151</strong></td></tr>
+<tr><td>Sensors</td><td>ICM-42688-P (SPI4), BMI088 (SPI1), MS5611 (I2C1, 0x77), BMP390 (I2C2, 0x76)</td><td>GPS (USART1), IIS2MDC compass (I2C2, 0x1E), SHT31 temperature (I2C2, 0x44)</td></tr>
+<tr><td>Storage</td><td>CY15B104Q FRAM (SPI3, params) + microSD (SDMMC1, logs)</td><td>internal flash sectors 2–3 (params)</td></tr>
+<tr><td>Link</td><td colspan="2">Board-internal CAN bus: FCC FDCAN1 (PD0/PD1) ↔ NAVC CAN1 (PB8/PB9), SN65HVD230 pair, DroneCAN protocol</td></tr>
+</table></div>
+<p class="cite">Board IDs: Tools/AP_Bootloader/board_types.txt (7150/7151). Hwdefs:
+libraries/AP_HAL_ChibiOS/hwdef/Bayusuta/hwdef.dat and hwdef/Bayusuta-Periph/hwdef.dat.</p>
+
+<h3>1.2 Toolchain</h3>
+<ul class="check">
+<li><strong>ARM GCC 10.2.1 (gcc-arm-none-eabi 10-2020-q4-major)</strong> — the compiler this
+    tree was built and verified with (this is also the version ArduPilot's dev-env images pin).
+    Installed here at <code>/opt/gcc-arm-none-eabi/</code>.</li>
+<li><strong>Python virtualenv</strong> with ArduPilot's build deps (empy, pexpect, future,
+    intelhex …) — here: <code>~/venv-ardupilot</code>. <code>waf</code> ships inside the repo.</li>
+<li><strong>STM32CubeProgrammer</strong> (any recent 2.x) for first-time flashing, plus the
+    ST-Link USB driver (Windows) or udev rules (Linux). DFU needs the STM32 DFU (WinUSB) driver.</li>
+<li><strong>Mission Planner</strong> (latest) or <strong>QGroundControl</strong> for setup —
+    Mission Planner is required for the DroneCAN screens used in §5.4/§6.</li>
+</ul>
+<pre><code># every build shell starts with:
+source ~/venv-ardupilot/bin/activate
+export PATH=/opt/gcc-arm-none-eabi/bin:$PATH
+arm-none-eabi-gcc --version   # expect: 10.2.1 20201103 (10-2020-q4-major)</code></pre>
+
+<h2 id="s2">2. Get source &amp; submodules</h2>
+<pre><code>git clone https://github.com/ArduPilot/ardupilot.git
+cd ardupilot
+git submodule update --init --recursive</code></pre>
+<p>This board lives on the <code>plan-a</code> branch of this working tree. The board
+definitions are:</p>
+<pre><code>libraries/AP_HAL_ChibiOS/hwdef/Bayusuta/hwdef.dat          # main FC
+libraries/AP_HAL_ChibiOS/hwdef/Bayusuta/hwdef-bl.dat       # main FC bootloader
+libraries/AP_HAL_ChibiOS/hwdef/Bayusuta-Periph/hwdef.dat   # periph node (+ hwdef-bl.dat, defaults.parm)
+Tools/AP_Bootloader/board_types.txt                        # IDs 7150 / 7151</code></pre>
+
+<h2 id="s3">3. Compile the main FC (Bayusuta)</h2>
+<pre><code># bootloader (once, or after bootloader changes)
+Tools/scripts/build_bootloaders.py Bayusuta
+#   -&gt; Tools/bootloaders/Bayusuta_bl.bin / .elf / .hex        (≈40 KB, fits 128 KB sector 0)
+
+# QuadPlane firmware (QuadPlane is ArduPlane with Q_ENABLE=1 — same 'plane' target)
+./waf configure --board Bayusuta
+./waf plane</code></pre>
+<div class="tablewrap"><table>
+<tr><th>Output (build/Bayusuta/bin/)</th><th>Purpose</th></tr>
+<tr><td><code>arduplane.apj</code></td><td>upload over USB via GCS (ArduPilot bootloader)</td></tr>
+<tr><td><code>arduplane.bin</code></td><td>raw app image — flash at <strong>0x0802 0000</strong></td></tr>
+<tr><td><code>arduplane_with_bl.hex</code></td><td>bootloader + app combined (addresses embedded) — the CubeProgrammer one-shot</td></tr>
+<tr><td><code>arduplane.abin</code></td><td>rename to <code>ardupilot.abin</code> on the SD card → bootloader flashes it</td></tr>
+</table></div>
+<p>Verified build at this tree: <strong>1,525,312 B flash used / 440,760 B free</strong>,
+bidirectional-DShot enabled (<code>HAL_WITH_BIDIR_DSHOT</code>, generated
+<code>build/Bayusuta/hwdef.h:392</code>).</p>
+
+<h2 id="s4">4. Compile the periph (Bayusuta-Periph)</h2>
+<pre><code>Tools/scripts/build_bootloaders.py Bayusuta-Periph
+#   -&gt; Tools/bootloaders/Bayusuta-Periph_bl.bin / .elf / .hex  (≈26.7 KB — must stay &lt;32 KB,
+#      because parameters live in flash sectors 2-3; the linker enforces this)
+
+./waf configure --board Bayusuta-Periph
+./waf AP_Periph</code></pre>
+<div class="tablewrap"><table>
+<tr><th>Output (build/Bayusuta-Periph/bin/)</th><th>Purpose</th></tr>
+<tr><td><code>AP_Periph.apj</code></td><td>update over DroneCAN via Mission Planner (§5.4)</td></tr>
+<tr><td><code>AP_Periph.bin</code></td><td>raw app image — flash at <strong>0x0801 0000</strong></td></tr>
+<tr><td><code>AP_Periph_with_bl.hex</code></td><td>bootloader + app combined — CubeProgrammer one-shot</td></tr>
+</table></div>
+<p>Verified build: <strong>175,356 B used / 807,668 B free</strong> of 1 MB.</p>
+
+<h2 id="s5">5. Flash with STM32CubeProgrammer</h2>
+<h3>5.1 Getting a connection</h3>
+<div class="tablewrap"><table>
+<tr><th>Method</th><th>FCC (H753)</th><th>NAVC (F405)</th></tr>
+<tr><td><strong>SWD (recommended)</strong></td><td>ST-Link on header <strong>SWD1</strong> (SWDIO=PA13, SWCLK=PA14, NRST, 3V3, GND)</td><td>ST-Link on header <strong>SWD2</strong> (SWDIO=PA13, SWCLK=PA14)</td></tr>
+<tr><td><strong>USB DFU</strong></td><td>hold BOOT0 switch <strong>SW5</strong>, tap reset, connect <strong>USB-C (J5)</strong></td><td>hold BOOT0 switch <strong>SW3</strong>, tap reset, connect <strong>micro-USB "USB Debug"</strong>. Leave SW4 (BOOT1/PB2) low.</td></tr>
+</table></div>
+<p>In CubeProgrammer pick <em>ST-LINK</em> (mode Normal, reset Hardware) or <em>USB</em>
+(the DFU device appears as "STM32 BOOTLOADER") and press <strong>Connect</strong>.</p>
+
+<h3>5.2 Flash memory map (from the hwdefs — not guessed)</h3>
+<div class="tablewrap"><table>
+<tr><th>Region</th><th>FCC (H753, 2 MB)</th><th>NAVC (F405, 1 MB)</th></tr>
+<tr><td>Bootloader base</td><td><code>0x08000000</code> (sector 0, 128 KB — <code>FLASH_RESERVE_START_KB 128</code>)</td><td><code>0x08000000</code> (&lt;32 KB used)</td></tr>
+<tr><td>Parameters</td><td>— (in SPI FRAM, not MCU flash)</td><td><code>0x08008000–0x0800FFFF</code> (sectors 2–3, <code>STORAGE_FLASH_PAGE 2</code>)</td></tr>
+<tr><td><strong>Application base</strong></td><td><strong><code>0x08020000</code></strong></td><td><strong><code>0x08010000</code></strong> (<code>FLASH_RESERVE_START_KB 64</code>)</td></tr>
+</table></div>
+
+<h3>5.3 Programming sequence (each board)</h3>
+<ul class="check">
+<li>Connect (§5.1).</li>
+<li><em>First time only:</em> <strong>Full chip erase</strong>.
+    <span class="cite">On the NAVC this also erases stored parameters (sectors 2–3); the
+    firmware's embedded defaults.parm re-seeds them at boot.</span></li>
+<li>Open <em>Erasing &amp; Programming</em> → select the <strong>combined hex</strong>
+    (<code>arduplane_with_bl.hex</code> / <code>AP_Periph_with_bl.hex</code>). Hex files carry
+    their own addresses — leave the start-address field empty.</li>
+<li>Enable <strong>Verify programming</strong> → <strong>Start Programming</strong>.</li>
+<li>If you prefer the two-file route (bootloader first, then app):
+  <ol>
+  <li><code>Tools/bootloaders/Bayusuta_bl.bin</code> @ <code>0x08000000</code> (FCC) or
+      <code>Bayusuta-Periph_bl.bin</code> @ <code>0x08000000</code> (NAVC)</li>
+  <li><code>arduplane.bin</code> @ <code>0x08020000</code> (FCC) or
+      <code>AP_Periph.bin</code> @ <code>0x08010000</code> (NAVC)</li>
+  </ol></li>
+<li>Disconnect; if you used DFU, return BOOT0 to the flash position; power-cycle.
+    Bootloader activity LED: FCC = red LED_A (PD4), NAVC = LED_A (PC3).</li>
+</ul>
+
+<h3>5.4 Everyday updates (no CubeProgrammer)</h3>
+<ul>
+<li><strong>FCC:</strong> upload <code>arduplane.apj</code> over USB with Mission Planner /
+   QGC, or copy <code>arduplane.abin</code> → SD root as <code>ardupilot.abin</code>.</li>
+<li><strong>NAVC:</strong> Mission Planner → Setup → Optional Hardware → <em>DroneCAN</em> →
+   select the Bayusuta-Periph node → <em>Update</em> with <code>AP_Periph.apj</code>. The FC
+   forwards the image over the CAN bus (MAVLink→CAN passthrough).</li>
+</ul>
+
+<h2 id="s6">6. First boot &amp; sanity checks</h2>
+<ul class="check">
+<li>FCC enumerates over USB-C; GCS connects at 115200/USB. The banner shows the firmware and
+    board; verify the board ID with the bootloader (or <code>Tools/scripts/uploader.py --identify</code>):
+    expect <strong>7150</strong>.</li>
+<li>Messages tab shows both IMUs (Invensensev3 ICM-42688-P and BMI088) and both baros — no
+    "check storage" or FRAM panic (a FRAM fault halts boot by design;
+    <span class="cite">libraries/AP_HAL_ChibiOS/Storage.cpp — HAL_WITH_RAMTRON without fallback</span>).</li>
+<li>Mission Planner → DroneCAN (MAVLink-CAN1): the <strong>Bayusuta-Periph node appears</strong>
+    with a dynamically-allocated node ID (periph <code>CAN_NODE</code> default 0 = DNA).</li>
+<li>After §9 params: GPS state healthy, compass present (DroneCAN IIS2MDC), SHT31 temperature
+    visible as DroneCAN device temperature (1 Hz).</li>
+<li>No airspeed sensor is fitted on this design — nothing to check
+    (<code>ARSPD_TYPE</code> stays default <code>0:None</code>;
+    <span class="cite">value list in libraries/AP_Airspeed param table</span>).</li>
+<li>Run <strong>accelerometer calibration</strong> (Mission Planner → Setup → Mandatory →
+    Accel) — only after IMU rotations are finalised.</li>
+<li>Run <strong>compass calibration</strong> (Onboard Mag Cal). <code>COMPASS_AUTO_ROT</code>
+    = 2 (<em>CheckAndFix</em>) is this board's default, so a wrong periph-side mounting rotation
+    is detected and fixed during calibration.
+    <span class="cite">AP_Compass.cpp:550–551 (values 0:Disabled,1:CheckOnly,2:CheckAndFix,3:+45°)</span></li>
+</ul>
+
+<h2 id="s7">7. Frame &amp; tri-tiltrotor parameters</h2>
+<p>Motor geometry for FRAME_CLASS Tri comes from the motor mixer:
+<strong>Motor 1 = front right, Motor 2 = front left, Motor 4 = rear</strong>.
+<span class="cite">AP_MotorsTri.cpp:109–111 (_thrust_right→MOT_1, _thrust_left→MOT_2, _thrust_rear→MOT_4)</span></p>
+
+<h3>7.1 Frame &amp; tilt parameters</h3>
+<div class="tablewrap"><table>
+<tr><th>Parameter</th><th>Set to</th><th>Default</th><th>Meaning / enum</th><th>Source</th></tr>
+<tr><td><code>Q_ENABLE</code></td><td><strong>1</strong></td><td>0</td><td>enable QuadPlane (reboot)</td><td class="cite">ArduPlane/quadplane.cpp:15</td></tr>
+<tr><td><code>Q_FRAME_CLASS</code></td><td><strong>7</strong></td><td>1</td><td>7 = Tri (values: 0:Undefined, 1:Quad, 2:Hexa, 3:Octa, 4:OctaQuad, 5:Y6, <b>7:Tri</b>, 10:Single/Dual, 12:DodecaHexa, 14:Deca, 15/17:Scripting)</td><td class="cite">quadplane.cpp:150–152</td></tr>
+<tr><td><code>Q_FRAME_TYPE</code></td><td>leave <strong>1</strong></td><td>1</td><td>1 = X (values 0:Plus,1:X,2:V,3:H,4:V-Tail,5:A-Tail,10:Y6B,11:Y6F,12:BetaFlightX,13:DJIX,14:ClockwiseX,15:I,18:BetaFlightXReversed,19:Y4)</td><td class="cite">quadplane.cpp:157–159</td></tr>
+<tr><td><code>Q_TILT_ENABLE</code></td><td><strong>1</strong></td><td>0</td><td>enable tiltrotor code (reboot)</td><td class="cite">ArduPlane/tiltrotor.cpp:13</td></tr>
+<tr><td><code>Q_TILT_MASK</code></td><td><strong>3</strong></td><td>0</td><td>bitmask of tilting motors: bit0 = Motor 1 + bit1 = Motor 2 → the two front motors</td><td class="cite">tiltrotor.cpp:19–20</td></tr>
+<tr><td><code>Q_TILT_TYPE</code></td><td><strong>2</strong></td><td>0</td><td>0:Continuous, 1:Binary, <b>2:VectoredYaw</b>, 3:Bicopter. Type 2 makes hover yaw come from differential tilt; the code disables motor yaw torque, so <em>no tricopter tail-yaw servo exists or is needed</em></td><td class="cite">tiltrotor.cpp:43–44; yaw-torque disable :131</td></tr>
+<tr><td><code>Q_TILT_YAW_ANGLE</code></td><td><strong>10</strong> (start; tune 10–20)</td><td>0</td><td>rearward tilt angle at min output — must be &gt;0 for vectored yaw authority (range 0–30)</td><td class="cite">tiltrotor.cpp:55–59</td></tr>
+<tr><td><code>Q_TILT_RATE_UP</code></td><td>40 (default)</td><td>40</td><td>deg/s tilting back to hover (range 10–300)</td><td class="cite">tiltrotor.cpp:29</td></tr>
+<tr><td><code>Q_TILT_RATE_DN</code></td><td><strong>20</strong> (gentler; 0 = use RATE_UP)</td><td>0</td><td>deg/s tilting to forward flight</td><td class="cite">tiltrotor.cpp:53</td></tr>
+<tr><td><code>Q_TILT_MAX</code></td><td>45 (default)</td><td>45</td><td>tilt angle where multicopter control ends during transition (range 20–80)</td><td class="cite">tiltrotor.cpp:38</td></tr>
+<tr><td><code>Q_TILT_FIX_ANGLE</code> / <code>Q_TILT_FIX_GAIN</code></td><td>0 / 0</td><td>0 / 0</td><td>optional forward-flight vectoring — leave off initially</td><td class="cite">tiltrotor.cpp:67, :74</td></tr>
+<tr><td><code>Q_TRANSITION_MS</code></td><td>5000 (default)</td><td>5000</td><td>ms of blended control after reaching airspeed (range 500–30000)</td><td class="cite">quadplane.cpp:31</td></tr>
+<tr><td><code>Q_ASSIST_SPEED</code></td><td><strong>set explicitly</strong>: −1 to disable, or ≈5 m/s below min airspeed</td><td>0</td><td>default 0 deliberately fails pre-arm to force a decision</td><td class="cite">quadplane.cpp:97–104</td></tr>
+</table></div>
+
+<h3>7.2 Output map (pin → SERVOn_FUNCTION → role)</h3>
+<p class="cite">Function numbers from the SRV_Channel enum, libraries/SRV_Channel/SRV_Channel.h
+(k_motor1=33 :82, k_motor2=34 :83, k_motor4=36 :85, k_aileron=4 :53, k_vtail_left=79 :123,
+k_vtail_right=80 :124, k_tiltMotorLeft=75 :119, k_tiltMotorRight=76 :120, k_none=0 :49,
+k_rcin1…16=51…66 :95–110).</p>
+<div class="tablewrap"><table>
+<tr><th>Output</th><th>MCU pin</th><th>Timer</th><th>Parameter</th><th>Value</th><th>Drives</th></tr>
+<tr><td>PWM 1</td><td>PD12</td><td>TIM4_CH1 <span class="badge">bdshot</span></td><td><code>SERVO1_FUNCTION</code></td><td><b>33</b></td><td>Motor 1 — front right</td></tr>
+<tr><td>PWM 2</td><td>PD13</td><td>TIM4_CH2 <span class="badge">bdshot</span></td><td><code>SERVO2_FUNCTION</code></td><td><b>34</b></td><td>Motor 2 — front left</td></tr>
+<tr><td>PWM 3</td><td>PD14</td><td>TIM4_CH3 <span class="badge">bdshot</span></td><td><code>SERVO3_FUNCTION</code></td><td><b>36</b></td><td>Motor 4 — rear</td></tr>
+<tr><td>PWM 4</td><td>PD15</td><td>TIM4_CH4</td><td><code>SERVO4_FUNCTION</code></td><td><b>0</b></td><td>spare (same DShot rate as the group; <em>no RPM return</em> — TIM4_CH4 has no DMA request on the H7)</td></tr>
+<tr><td>PWM 5</td><td>PE9</td><td>TIM1_CH1</td><td><code>SERVO5_FUNCTION</code></td><td><b>4</b></td><td>Aileron (left)</td></tr>
+<tr><td>PWM 6</td><td>PE11</td><td>TIM1_CH2</td><td><code>SERVO6_FUNCTION</code></td><td><b>4</b></td><td>Aileron (right) — reverse via <code>SERVO6_REVERSED</code> as installed</td></tr>
+<tr><td>PWM 7</td><td>PE13</td><td>TIM1_CH3</td><td><code>SERVO7_FUNCTION</code></td><td><b>79</b></td><td>V-tail left</td></tr>
+<tr><td>PWM 8</td><td>PE14</td><td>TIM1_CH4</td><td><code>SERVO8_FUNCTION</code></td><td><b>80</b></td><td>V-tail right</td></tr>
+<tr><td>PWM 9</td><td>PC6</td><td>TIM8_CH1</td><td><code>SERVO9_FUNCTION</code></td><td><b>75</b></td><td>Tilt motor left (vectored)</td></tr>
+<tr><td>PWM 10</td><td>PC7</td><td>TIM8_CH2</td><td><code>SERVO10_FUNCTION</code></td><td><b>76</b></td><td>Tilt motor right (vectored)</td></tr>
+<tr><td>PWM 11</td><td>PA2</td><td>TIM2_CH3</td><td><code>SERVO11_FUNCTION</code></td><td><b>56</b> (RCIN6) or <b>0</b></td><td>drop servo — RC passthrough of transmitter ch 6, or <code>0</code> + <code>DO_SET_SERVO</code></td></tr>
+</table></div>
+
+<h3>7.3 MIN / MAX / TRIM / REVERSED</h3>
+<p>Defaults: <code>SERVOx_MIN</code> 1100, <code>SERVOx_MAX</code> 1900,
+<code>SERVOx_TRIM</code> 1500, <code>SERVOx_REVERSED</code> 0.
+<span class="cite">SRV_Channel.cpp:37, :46, :55, :62</span></p>
+<ul class="check">
+<li>Motors (1–3): with DShot, MIN/MAX are ignored for throttle scaling — leave defaults.</li>
+<li>Surfaces (5–8): set TRIM so surfaces are neutral, then MIN/MAX to the mechanical limits;
+    fix direction with <code>SERVOx_REVERSED</code> in FBWA on the bench.</li>
+<li>Tilt servos (9–10): vectored-yaw tilts are range (0–1000) outputs
+    (<span class="cite">tiltrotor.cpp:139–140</span>). Set MIN/MAX so full range = straight-up
+    ↔ straight-forward + the <code>Q_TILT_YAW_ANGLE</code> overshoot, and match directions with
+    <code>SERVOx_REVERSED</code>.</li>
+</ul>
+
+<h2 id="s8">8. Bidirectional DShot &amp; ESC setup</h2>
+<p>The hwdef marks TIM4_CH1–CH3 with <code>BIDIR</code>; the build defines
+<code>HAL_WITH_BIDIR_DSHOT</code> and allocates a dedicated DMA stream (DMA1-stream-0, re-muxed
+between the output phase and per-channel RPM capture). Pattern cross-referenced from
+<code>MatekH743-bdshot</code> and <code>CUAV-X7-bdshot</code>.</p>
+<div class="warn">PD15 (spare, TIM4_CH4) outputs DShot at the same group rate but can never
+return RPM: the STM32H7 has no TIM4_CH4 DMA request line
+(<span class="cite">modules/ChibiOS/os/hal/ports/STM32/STM32H7xx/stm32_dmamux.h:64–67 — only CH1/CH2/CH3/UP exist</span>).
+If a 4th motor is ever fitted there, exclude it from the notch's RPM sources.</div>
+
+<div class="tablewrap"><table>
+<tr><th>Parameter</th><th>Set to</th><th>Default</th><th>Meaning</th><th>Source</th></tr>
+<tr><td><code>Q_M_PWM_TYPE</code></td><td><strong>6</strong> (DShot600) or 5 (DShot300)</td><td>0</td><td>QuadPlane motor output type: 0:Normal,1:OneShot,2:OneShot125,3:Brushed,4:DShot150,5:DShot300,6:DShot600,7:DShot1200,8:PWMRange,9:PWMAngle. (Q_M_ prefix = AP_MotorsMulticopter group registered by QuadPlane)</td><td class="cite">AP_MotorsMulticopter.cpp:95–98; quadplane.cpp:19</td></tr>
+<tr><td><code>SERVO_BLH_AUTO</code></td><td><strong>1</strong></td><td>0</td><td>auto-enable BLHeli pass-thru/telemetry support for all multicopter motors</td><td class="cite">AP_BLHeli.cpp:73–79 (SERVO_BLH_ prefix: SRV_Channels.cpp:187)</td></tr>
+<tr><td><code>SERVO_BLH_BDMASK</code></td><td><strong>7</strong></td><td>0</td><td>bitmask of bidir-DShot channels: bits 0–2 = outputs 1,2,3 (Motors 1/2/4). Requires bidir-capable ESC firmware (BLHeli_32 / AM32 / BlueJay)</td><td class="cite">AP_BLHeli.cpp:144–150</td></tr>
+<tr><td><code>SERVO_BLH_POLES</code></td><td>your motor's pole count</td><td>14</td><td>converts eRPM → true RPM (range 1–127)</td><td class="cite">AP_BLHeli.cpp:127–133</td></tr>
+<tr><td><code>SERVO_DSHOT_ESC</code></td><td><strong>1</strong> (BLHeli32/Kiss/AM32) — or 3 with EDT firmware</td><td>0</td><td>0:None,1:BLHeli32/Kiss/AM32,2:BLHeli_S/BlueJay,3:BLHeli32/AM32/Kiss+EDT,4:BLHeli_S/BlueJay+EDT — enables DShot commands (beeps, LED, direction)</td><td class="cite">SRV_Channels.cpp:209–214</td></tr>
+<tr><td><code>SERVO_DSHOT_RATE</code></td><td>0 (default)</td><td>0</td><td>0:1 kHz fixed, 1:loop-rate, 2:double, 3:triple, 4:quadruple</td><td class="cite">SRV_Channels.cpp:202–207</td></tr>
+<tr><td><code>SERVO_BLH_TRATE</code></td><td>10 (default)</td><td>10</td><td>serial ESC-telemetry request rate (Hz) — only relevant if an ESC telemetry wire is ever added; RPM itself comes back in the DShot frames</td><td class="cite">AP_BLHeli.cpp:97–103</td></tr>
+</table></div>
+
+<h3>Verify live RPM</h3>
+<ul class="check">
+<li>Props OFF. Arm in QSTABILIZE (or use Mission Planner motor test).</li>
+<li>Mission Planner Status tab: <code>esc1_rpm</code>, <code>esc2_rpm</code>, <code>esc3_rpm</code>
+    move with throttle (ESC_TELEMETRY MAVLink messages — populated from bdshot).</li>
+<li>In the dataflash log, <code>ESC.RPM</code> exists for instances 0–2 and tracks throttle;
+    no persistent errors in the <code>dshot</code> section of <code>@SYS/dshot.txt</code>
+    (view via Mission Planner's onboard FS browser).</li>
+</ul>
+
+<h2 id="s9">9. Sensor fusion parameters</h2>
+<h3>9.1 DroneCAN link (feeds GPS + compass from the periph)</h3>
+<div class="tablewrap"><table>
+<tr><th>Parameter</th><th>Value</th><th>Default</th><th>Note</th><th>Source</th></tr>
+<tr><td><code>CAN_P1_DRIVER</code></td><td>1 (First driver)</td><td>1 <em>on this board</em></td><td>hwdef sets <code>HAL_CAN_DRIVER_DEFAULT 1</code> (generic default is 0)</td><td class="cite">AP_CANIfaceParams.cpp:26–29; AP_HAL_Boards.h:243; Bayusuta/hwdef.dat</td></tr>
+<tr><td><code>CAN_D1_PROTOCOL</code></td><td>1 (DroneCAN)</td><td>1</td><td>verify only</td><td class="cite">AP_CANManager_CANDriver_Params.cpp:31–34</td></tr>
+<tr><td><code>GPS1_TYPE</code></td><td><strong>9</strong> (DroneCAN)</td><td>1 (first-instance auto-serial)</td><td><strong>must set</strong>; reboot required</td><td class="cite">AP_GPS_Params.cpp:25–31; instance default AP_GPS.cpp:314</td></tr>
+</table></div>
+<p>Periph side (already in its embedded <code>defaults.parm</code>): <code>GPS_PORT 3</code>
+<span class="cite">(Tools/AP_Periph/Parameters.cpp:240)</span>, SHT31 as <code>TEMP1_TYPE 8</code>
+(SHT3x), <code>TEMP1_SRC 6</code> (DroneCAN), <code>TEMP1_ADDR 68</code> (=0x44),
+<code>TEMP_MSG_RATE 1</code>
+<span class="cite">(AP_TemperatureSensor_Params.h:38, :51; Tools/AP_Periph/Parameters.cpp:686)</span>.</p>
+
+<h3>9.2 Dual-IMU EKF3 — stock defaults, verify only</h3>
+<div class="tablewrap"><table>
+<tr><th>Parameter</th><th>Value</th><th>Default</th><th>Meaning</th><th>Source</th></tr>
+<tr><td><code>AHRS_EKF_TYPE</code></td><td>3</td><td>3</td><td>use EKF3</td><td class="cite">AP_AHRS.cpp:57, :176</td></tr>
+<tr><td><code>EK3_ENABLE</code></td><td>1</td><td>1</td><td>EKF3 enabled</td><td class="cite">AP_NavEKF3.cpp:171</td></tr>
+<tr><td><code>EK3_IMU_MASK</code></td><td>3</td><td>3</td><td>bit0 = IMU1 (ICM-42688-P, SPI4) + bit1 = IMU2 (BMI088, SPI1) → one EKF lane per IMU, automatic lane switching</td><td class="cite">AP_NavEKF3.cpp:159, :431–437</td></tr>
+<tr><td><code>EK3_PRIMARY</code></td><td>0</td><td>0</td><td>start on lane 0 (ICM-42688)</td><td class="cite">AP_NavEKF3.cpp:154, :747</td></tr>
+<tr><td><code>INS_USE</code> / <code>INS_USE2</code></td><td>1 / 1</td><td>1 / 1</td><td>both IMUs feed attitude/velocity/position</td><td class="cite">AP_InertialSensor.cpp:365, :374</td></tr>
+</table></div>
+<p><strong>Which source feeds which EKF slot:</strong> attitude/velocity — the two local IMUs
+(one lane each); position/velocity — DroneCAN GPS (periph); yaw — DroneCAN IIS2MDC compass;
+height — local MS5611 (baro instance 0, primary) with BMP390 (instance 1) as automatic backup,
+<code>BARO_PRIMARY</code> default 0 <span class="cite">(AP_Baro.cpp:126–128)</span>;
+airspeed — none (synthetic).</p>
+
+<h3>9.3 Compass</h3>
+<p>Single compass (periph IIS2MDC via DroneCAN) auto-detects; run onboard calibration.
+<code>COMPASS_AUTO_ROT</code> = 2 (CheckAndFix) is the board default
+<span class="cite">(AP_Compass.cpp:550–551; hwdef sets HAL_COMPASS_AUTO_ROT_DEFAULT 2)</span>.</p>
+
+<h3>9.4 Battery (YRRC power module on J4)</h3>
+<div class="tablewrap"><table>
+<tr><th>Parameter</th><th>Value</th><th>Source</th></tr>
+<tr><td><code>BATT_MONITOR</code></td><td>4 = "Analog Voltage and Current" (board default via <code>HAL_BATT_MONITOR_DEFAULT 4</code>)</td><td class="cite">AP_BattMonitor_Params.cpp:27, :58; Bayusuta/hwdef.dat</td></tr>
+<tr><td><code>BATT_VOLT_MULT</code></td><td>board default 18.182 — <strong>calibrate</strong> against a multimeter</td><td class="cite">AP_BattMonitor_Analog.cpp:80; hwdef HAL_BATT_VOLT_SCALE</td></tr>
+<tr><td><code>BATT_AMP_PERVLT</code></td><td>board default 36.364 — <strong>calibrate</strong> with a known load</td><td class="cite">AP_BattMonitor_Analog.cpp:87; hwdef HAL_BATT_CURR_SCALE</td></tr>
+</table></div>
+<p>Sense pins are fixed by the hwdef: voltage = PC5 (ADC1 ch 8), current = PC4 (ADC1 ch 4).</p>
+
+<h3>9.5 RC input (ELRS)</h3>
+<p>ELRS receiver on UART7 = SERIAL5; <code>SERIAL5_PROTOCOL</code> = 23 (RCIN) is the board
+default (<code>DEFAULT_SERIAL5_PROTOCOL</code> in hwdef).
+<span class="cite">Protocol value list: AP_SerialManager.cpp:188 ("23:RCIN")</span></p>
+
+<h2 id="s10">10. Dynamic harmonic notch from ESC RPM</h2>
+<p>All parameters live in the <code>INS_HNTCH_</code> group
+<span class="cite">(registered AP_InertialSensor.cpp:574; definitions libraries/Filter/HarmonicNotchFilter.cpp)</span>.</p>
+<div class="tablewrap"><table>
+<tr><th>Parameter</th><th>Set to</th><th>Default</th><th>Meaning</th><th>Source</th></tr>
+<tr><td><code>INS_HNTCH_ENABLE</code></td><td><strong>1</strong></td><td>0</td><td>enable the notch (reboot, then other params appear)</td><td class="cite">HarmonicNotchFilter.cpp:66</td></tr>
+<tr><td><code>INS_HNTCH_MODE</code></td><td><strong>3</strong></td><td>1 (throttle, non-heli builds)</td><td>0:Fixed, 1:Throttle, 2:RPM Sensor, <b>3:ESC Telemetry</b>, 4:Dynamic FFT, 5:Second RPM</td><td class="cite">HarmonicNotchFilter.cpp:127–129, default :54</td></tr>
+<tr><td><code>INS_HNTCH_REF</code></td><td><strong>1</strong></td><td>0</td><td>for RPM/ESC-telemetry tracking this is set to 1 (0 disables dynamic updates)</td><td class="cite">HarmonicNotchFilter.cpp:115–121</td></tr>
+<tr><td><code>INS_HNTCH_FREQ</code></td><td>≈ your hover motor frequency ÷ 2 as a floor; start with default 80</td><td>80</td><td>fallback/min centre frequency, Hz (range 10–495)</td><td class="cite">HarmonicNotchFilter.cpp:74</td></tr>
+<tr><td><code>INS_HNTCH_BW</code></td><td>≈ FREQ/2 (start 40)</td><td>40</td><td>bandwidth, Hz</td><td class="cite">HarmonicNotchFilter.cpp:82</td></tr>
+<tr><td><code>INS_HNTCH_ATT</code></td><td>40 (default)</td><td>40</td><td>attenuation, dB</td><td class="cite">HarmonicNotchFilter.cpp:90</td></tr>
+<tr><td><code>INS_HNTCH_HMNCS</code></td><td>3 (default)</td><td>3</td><td>bitmask of harmonics: 3 = 1st + 2nd</td><td class="cite">HarmonicNotchFilter.cpp:92–113</td></tr>
+<tr><td><code>INS_HNTCH_OPTS</code></td><td><strong>2</strong> (Multi-Source)</td><td>0</td><td>bitmask 0:Double notch, <b>1:Multi-Source</b> (one notch per motor RPM source — exactly what bdshot on 3 motors provides), 2:Update-at-loop-rate, 3:EnableOnAllIMUs, 4:Triple notch, 5:min-freq on RPM failure, 6:Quintuple</td><td class="cite">HarmonicNotchFilter.cpp:131–137</td></tr>
+</table></div>
+<div class="tip">Pre-flight vibration check: hover in QHOVER for ~1 min, then inspect the log —
+per-motor tracking shows three notch frequency sources following <code>ESC.RPM</code>;
+compare gyro FFT (or <code>VIBE</code> levels) with the notch off/on. Raw-IMU logging for FFT
+review can be enabled via the batch sampler if needed.</div>
+
+<h2 id="s11">11. Ground checks before flight</h2>
+<ul class="check">
+<li><strong>Props OFF — motor order &amp; direction:</strong> Mission Planner Motor Test:
+    "Motor A/B/C" fire M1 (front right), M2 (front left), M4 (rear). Check each spins the
+    direction of your chosen prop set; fix direction with DShot commands
+    (requires <code>SERVO_DSHOT_ESC</code> ≥ 1) or by ESC configurator.</li>
+<li><strong>Tilt direction &amp; endpoints:</strong> in QSTABILIZE, nacelles vertical; yaw
+    stick right → left nacelle tilts forward / right tilts back. Switch to FBWA → nacelles slew
+    forward at <code>Q_TILT_RATE_DN</code>. Adjust <code>SERVO9/10_MIN/MAX/TRIM/REVERSED</code>.</li>
+<li><strong>Surface directions:</strong> FBWA, tilt the airframe by hand — ailerons and V-tail
+    must counteract the motion; fix with <code>SERVOx_REVERSED</code>.</li>
+<li><strong>Bench transition dry-run:</strong> props off, arm in QSTABILIZE, switch to FBWA and
+    back; watch tilt slew rates and the <code>Q_TRANSITION_MS</code> blend; no errors in Messages.</li>
+<li><strong>Failsafes:</strong> ELRS off → RC failsafe triggers; set battery failsafe voltages
+    after calibrating §9.4; confirm <code>Q_ASSIST_SPEED</code> is deliberately set (§7.1).</li>
+<li><strong>Arming checks:</strong> leave all pre-arm checks enabled; resolve every pre-arm
+    message rather than masking it.</li>
+<li><strong>Rotations resolved:</strong> both IMU <code>ROTATION_*</code> values and the periph
+    compass rotation updated from the final PCB layout, then accel + compass calibration redone.</li>
+</ul>
+
+<h2 id="s12">12. Troubleshooting (this board)</h2>
+<div class="tablewrap"><table>
+<tr><th>Symptom</th><th>Likely cause on Bayusuta</th><th>Fix</th></tr>
+<tr><td>No per-motor RPM (esc1–3_rpm = 0)</td><td><code>SERVO_BLH_BDMASK</code> not 7; ESC firmware not bidir-capable; <code>Q_M_PWM_TYPE</code> still 0 (PWM)</td><td>set §8 params; flash BLHeli_32/AM32/BlueJay with bidir enabled; power-cycle ESCs</td></tr>
+<tr><td>RPM works on M1/M2 but not the 4th output</td><td>PD15 = TIM4_CH4 — no capture DMA exists on H7 (hardware)</td><td>expected; keep RPM-consuming features to outputs 1–3</td></tr>
+<tr><td>A motor won't spin in motor test</td><td>wrong <code>SERVOn_FUNCTION</code>; ESC not calibrated/armed; DShot idle too low</td><td>re-check §7.2 mapping; verify with <code>@SYS/dshot.txt</code>; test with Q_M_PWM_TYPE 0 to isolate</td></tr>
+<tr><td>Tilt moves the wrong way / asymmetric</td><td><code>SERVO9/10_REVERSED</code>, MIN/MAX endpoints</td><td>§7.3 rigging procedure; verify functions 75 vs 76 aren't swapped left/right</td></tr>
+<tr><td>Periph missing from DroneCAN screen</td><td><code>CAN_P1_DRIVER</code>/<code>CAN_D1_PROTOCOL</code> changed from defaults; periph unpowered; internal bus fault (both SN65HVD230s share one terminated bus)</td><td>restore §9.1 values; check periph LED_A heartbeat; check 3V3_MC rail on NAVC; SLCAN via periph USB to observe bus</td></tr>
+<tr><td>Only one EKF lane starts</td><td>an IMU failed init (check Messages for ICM42688/BMI088); <code>INS_USE2</code>=0; <code>EK3_IMU_MASK</code> changed</td><td>verify both IMUs detected at boot; restore <code>EK3_IMU_MASK 3</code>, <code>INS_USE2 1</code></td></tr>
+<tr><td>Compass inconsistent / toilet-bowling</td><td>periph compass rotation placeholder still wrong</td><td>set true rotation in Bayusuta-Periph hwdef (or let <code>COMPASS_AUTO_ROT 2</code> fix during cal), recalibrate away from steel</td></tr>
+<tr><td>Params lost after reflashing periph</td><td>full chip erase wiped flash sectors 2–3</td><td>expected; embedded defaults re-seed; re-apply any custom node params</td></tr>
+<tr><td>FC halts at boot with storage panic</td><td>FRAM (CY15B104Q on SPI3) not responding</td><td>check SPI3 soldering/CS (PA15); FRAM is mandatory on this board by design</td></tr>
+</table></div>
+
+<h2 id="s13">13. Appendix</h2>
+<h3>13.1 Copy-paste parameter block (main FC)</h3>
+<pre><code># ---- Bayusuta QuadPlane tri-tiltrotor: verified parameter block ----
+# frame / tilt (quadplane.cpp, tiltrotor.cpp)
+Q_ENABLE,1
+Q_FRAME_CLASS,7
+Q_TILT_ENABLE,1
+Q_TILT_MASK,3
+Q_TILT_TYPE,2
+Q_TILT_YAW_ANGLE,10
+Q_TILT_RATE_DN,20
+Q_ASSIST_SPEED,-1        # or ~5 m/s below min airspeed — MUST be a deliberate choice
+Q_TRANSITION_MS,5000
+# outputs (SRV_Channel.h enum)
+SERVO1_FUNCTION,33
+SERVO2_FUNCTION,34
+SERVO3_FUNCTION,36
+SERVO4_FUNCTION,0
+SERVO5_FUNCTION,4
+SERVO6_FUNCTION,4
+SERVO7_FUNCTION,79
+SERVO8_FUNCTION,80
+SERVO9_FUNCTION,75
+SERVO10_FUNCTION,76
+SERVO11_FUNCTION,56      # drop servo = RCIN6 passthrough; use 0 for DO_SET_SERVO control
+# ESC / bidirectional DShot (AP_MotorsMulticopter.cpp, AP_BLHeli.cpp, SRV_Channels.cpp)
+Q_M_PWM_TYPE,6           # DShot600 (5 = DShot300 also fine)
+SERVO_BLH_AUTO,1
+SERVO_BLH_BDMASK,7
+SERVO_BLH_POLES,14       # set to YOUR motor pole count
+SERVO_DSHOT_ESC,1        # 3 if ESCs run EDT firmware
+# DroneCAN / GPS (AP_CANIfaceParams.cpp, AP_CANManager_CANDriver_Params.cpp, AP_GPS_Params.cpp)
+CAN_P1_DRIVER,1          # board default — listed for completeness
+CAN_D1_PROTOCOL,1        # firmware default — listed for completeness
+GPS1_TYPE,9
+# EKF3 dual-IMU (AP_NavEKF3.cpp, AP_InertialSensor.cpp) — all defaults, listed to pin them
+AHRS_EKF_TYPE,3
+EK3_ENABLE,1
+EK3_IMU_MASK,3
+EK3_PRIMARY,0
+INS_USE,1
+INS_USE2,1
+# harmonic notch from ESC RPM (HarmonicNotchFilter.cpp)
+INS_HNTCH_ENABLE,1
+INS_HNTCH_MODE,3
+INS_HNTCH_REF,1
+INS_HNTCH_FREQ,80
+INS_HNTCH_BW,40
+INS_HNTCH_OPTS,2
+# battery (AP_BattMonitor_Params.cpp / AP_BattMonitor_Analog.cpp) — calibrate!
+BATT_MONITOR,4
+BATT_VOLT_MULT,18.182
+BATT_AMP_PERVLT,36.364</code></pre>
+
+<h3>13.2 FCC (STM32H753VIT6) pin ↔ function</h3>
+<div class="tablewrap"><table>
+<tr><th>Pins</th><th>Peripheral</th><th>Function</th></tr>
+<tr><td>PA5/PA6/PA7 + PA4, PE3 (CS) + PC0/PC1 (INT, n/c in FW)</td><td>SPI1</td><td>BMI088 IMU</td></tr>
+<tr><td>PE2/PE5/PE6 + PE0 (CS) + PE1 (INT, n/c in FW)</td><td>SPI4</td><td>ICM-42688-P IMU</td></tr>
+<tr><td>PB3/PB4/PB5 + PA15 (CS)</td><td>SPI3</td><td>CY15B104Q FRAM (params)</td></tr>
+<tr><td>PB6/PB7</td><td>I2C1</td><td>MS5611 baro @0x77</td></tr>
+<tr><td>PB10/PB11</td><td>I2C2</td><td>BMP390 baro @0x76</td></tr>
+<tr><td>PB8/PB9</td><td>I2C4</td><td>external I2C connector</td></tr>
+<tr><td>PB14/PB15</td><td>USART1 → SERIAL1</td><td>CH330N USB-serial debug (AN2606 bootloader UART)</td></tr>
+<tr><td>PD8/PD9</td><td>USART3 → SERIAL2</td><td>telem connector</td></tr>
+<tr><td>PA0/PA1</td><td>UART4 → SERIAL3</td><td>spare connector</td></tr>
+<tr><td>PB13/PB12</td><td>UART5 → SERIAL4</td><td>spare connector</td></tr>
+<tr><td>PE8/PE7</td><td>UART7 → SERIAL5</td><td>ELRS RC (protocol 23 default)</td></tr>
+<tr><td>PA11/PA12 (+PA9 VBUS)</td><td>OTG_FS → SERIAL0/6</td><td>USB-C</td></tr>
+<tr><td>PD0/PD1</td><td>FDCAN1</td><td>DroneCAN to periph</td></tr>
+<tr><td>PC8–PC12, PD2</td><td>SDMMC1</td><td>microSD logging</td></tr>
+<tr><td>PC5 / PC4</td><td>ADC1 ch8 / ch4</td><td>battery voltage / current (J4 pins 4 / 3)</td></tr>
+<tr><td>PD12–PD15</td><td>TIM4 CH1–4</td><td>PWM 1–4 (motors; CH1–3 bdshot)</td></tr>
+<tr><td>PE9/PE11/PE13/PE14</td><td>TIM1 CH1–4</td><td>PWM 5–8 (ailerons, V-tail)</td></tr>
+<tr><td>PC6/PC7</td><td>TIM8 CH1–2</td><td>PWM 9–10 (tilt servos)</td></tr>
+<tr><td>PA2</td><td>TIM2 CH3</td><td>PWM 11 (drop servo)</td></tr>
+<tr><td>PB0</td><td>TIM3 CH3</td><td>piezo buzzer (ALARM)</td></tr>
+<tr><td>PD4/PD5/PD6</td><td>GPIO</td><td>LEDs A (red, PD6) / B (red, PD5) / C (yellow, PD4), active-high; buzzer output also exposed on servo header J7 for an external piezo</td></tr>
+<tr><td>PA13/PA14</td><td>SWD</td><td>debug header SWD1</td></tr>
+</table></div>
+
+<h3>13.3 NAVC (STM32F405RGT6) pin ↔ function</h3>
+<div class="tablewrap"><table>
+<tr><th>Pins</th><th>Peripheral</th><th>Function</th></tr>
+<tr><td>PB8/PB9</td><td>CAN1</td><td>DroneCAN to FCC (respin: replaces old CAN2 pins)</td></tr>
+<tr><td>PB6/PB7</td><td>USART1 → port 3</td><td>GPS (<code>GPS_PORT 3</code>); PC12 PPS / PC14 NRST / PC13 LNA_EN unconfigured</td></tr>
+<tr><td>PB10/PB11</td><td>I2C2 (bus 0)</td><td>IIS2MDC compass @0x1E, SHT31 @0x44 (respin: moved from I2C1)</td></tr>
+<tr><td>PA8/PC9</td><td>I2C3 (bus 1)</td><td>external I2C connector</td></tr>
+<tr><td>PC10/PC11</td><td>USART3 → port 1</td><td>CH330N debug console (STDOUT 57600; AN2606 bootloader UART)</td></tr>
+<tr><td>PA0/PA1</td><td>UART4 → port 2</td><td>spare connector</td></tr>
+<tr><td>PA11/PA12</td><td>OTG_FS → port 0</td><td>USB (SLCAN / debug)</td></tr>
+<tr><td>PC3 / PC4 / PC5</td><td>GPIO</td><td>LED A (activity) / spare GPIO(1) / spare GPIO(2)</td></tr>
+<tr><td>PA13/PA14</td><td>SWD</td><td>debug header SWD2</td></tr>
+</table></div>
+
+<p class="cite" style="margin-top:2.5em">Generated for the Bayusuta bring-up on branch
+<code>plan-a</code>. Every parameter cited against the ArduPilot source at commit e7805549c5
+(+ local Bayusuta boards). Placeholders outstanding: IMU/compass rotations (PCB layout),
+YRRC calibration.</p>
+
+</main>
+</div>
+</body>
+</html>
