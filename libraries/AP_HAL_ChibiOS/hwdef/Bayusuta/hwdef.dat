@@ -145,9 +145,9 @@ PB0 TIM3_CH3 TIM3 GPIO(32) ALARM
 # three discrete LEDs, driven high through series resistor to GND
 # (respin order: LED_A on PD6, LED_C on PD4)
 define AP_NOTIFY_GPIO_LED_3_ENABLED 1
-PD6 LED_A OUTPUT LOW GPIO(90)  # red
-PD5 LED_B OUTPUT LOW GPIO(91)  # red
-PD4 LED_C OUTPUT LOW GPIO(92)  # yellow
+PE10 LED_A OUTPUT LOW GPIO(90)  # red
+PB2 LED_B OUTPUT LOW GPIO(91)  # red
+PB1 LED_C OUTPUT LOW GPIO(92)  # yellow
 define HAL_GPIO_A_LED_PIN 90
 define HAL_GPIO_B_LED_PIN 91
 define HAL_GPIO_C_LED_PIN 92
