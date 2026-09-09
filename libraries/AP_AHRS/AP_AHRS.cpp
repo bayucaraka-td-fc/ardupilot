@@ -38,7 +38,6 @@
 #include <AP_Vehicle/AP_Vehicle_Type.h>
 #include <GCS_MAVLink/GCS.h>
 #include <AP_InertialSensor/AP_InertialSensor.h>
-#include <AP_CustomRotations/AP_CustomRotations.h>
 
 #include <AP_Mission/AP_Mission_config.h>
 #if AP_MISSION_ENABLED
@@ -175,35 +174,11 @@ const AP_Param::GroupInfo AP_AHRS::var_info[] = {
     // @User: Advanced
     AP_GROUPINFO("EKF_TYPE",  14, AP_AHRS, _ekf_type, HAL_AHRS_EKF_TYPE_DEFAULT),
 
-    // @Param: CUSTOM_ROLL
-    // @DisplayName: Board orientation roll offset
-    // @Description: Autopilot mounting position roll offset. Positive values = roll right, negative values = roll left. This parameter is only used when AHRS_ORIENTATION is set to CUSTOM.
-    // @Range: -180 180
-    // @Units: deg
-    // @Increment: 1
-    // @User: Advanced
+    // index 15 was CUSTOM_ROLL
 
-    // index 15
+    // index 16 was CUSTOM_PIT
 
-    // @Param: CUSTOM_PIT
-    // @DisplayName: Board orientation pitch offset
-    // @Description: Autopilot mounting position pitch offset. Positive values = pitch up, negative values = pitch down. This parameter is only used when AHRS_ORIENTATION is set to CUSTOM.
-    // @Range: -180 180
-    // @Units: deg
-    // @Increment: 1
-    // @User: Advanced
-
-    // index 16
-
-    // @Param: CUSTOM_YAW
-    // @DisplayName: Board orientation yaw offset
-    // @Description: Autopilot mounting position yaw offset. Positive values = yaw right, negative values = yaw left. This parameter is only used when AHRS_ORIENTATION is set to CUSTOM.
-    // @Range: -180 180
-    // @Units: deg
-    // @Increment: 1
-    // @User: Advanced
-
-    // index 17
+    // index 17 was CUSTOM_YAW
 
     // @Param: OPTIONS
     // @DisplayName: Optional AHRS behaviour
@@ -370,26 +345,6 @@ void AP_AHRS::init()
 
     // initialise this as no-change from the active type:
     last_active_ekf_type = state.active_EKF_type;
-
-#if AP_CUSTOMROTATIONS_ENABLED
-    // convert to new custom rotation
-    // PARAMETER_CONVERSION - Added: Nov-2021
-    if (_board_orientation == ROTATION_CUSTOM_OLD) {
-        _board_orientation.set_and_save(ROTATION_CUSTOM_1);
-        AP_Param::ConversionInfo info;
-        if (AP_Param::find_top_level_key_by_pointer(this, info.old_key)) {
-            info.type = AP_PARAM_FLOAT;
-            float rpy[3] = {};
-            AP_Float rpy_param;
-            for (info.old_group_element=15; info.old_group_element<=17; info.old_group_element++) {
-                if (AP_Param::find_old_parameter(&info, &rpy_param)) {
-                    rpy[info.old_group_element-15] = rpy_param.get();
-                }
-            }
-            AP::custom_rotations().convert(ROTATION_CUSTOM_1, rpy[0], rpy[1], rpy[2]);
-        }
-    }
-#endif  // AP_CUSTOMROTATIONS_ENABLED
 }
 
 // has_status returns information about the EKF health and
@@ -564,46 +519,20 @@ void AP_AHRS::try_set_common_origin(const AP_AHRS_Backend &source_backend, const
 void AP_AHRS::update_reset_counters()
 {
     if (state.active_EKF_type != last_active_ekf_type) {
-        const auto *last = estimates_for_type(last_active_ekf_type);
-
-        // deltas across the estimator change come from differencing
-        // old and new backend estimates; zero if either side invalid
-        float yaw_delta = 0;
-        Vector2f pos_ne_delta;
-        float pos_d_delta = 0;
-        if (last != nullptr) {
-            if (active_estimates->attitude_valid && last->attitude_valid) {
-                yaw_delta = wrap_PI(active_estimates->yaw_rad - last->yaw_rad);
-            }
-            if (active_estimates->position_NE_valid && last->position_NE_valid) {
-                pos_ne_delta = (active_estimates->position_NE - last->position_NE).tofloat();
-            }
-            if (active_estimates->position_D_valid && last->position_D_valid) {
-                pos_d_delta = active_estimates->position_D - last->position_D;
-            }
-        }
-
-        attitude_reset_count++;
-        active_estimates_attitude_reset_count = active_estimates->attitude_reset_count;
-        yaw_reset_tracker.fill(active_estimates->yaw_reset_count, yaw_delta);
-        position_NE_reset_tracker.fill(active_estimates->position_NE_reset_count, pos_ne_delta);
-        position_D_reset_tracker.fill(active_estimates->position_D_reset_count, pos_d_delta);
+        attitude_reset_tracker.fill(active_estimates->attitude_reset_count);
+        yaw_reset_tracker.fill(active_estimates->yaw_reset_count);
+        position_NE_reset_tracker.fill(active_estimates->position_NE_reset_count);
+        position_D_reset_tracker.fill(active_estimates->position_D_reset_count);
         LOGGER_WRITE_EVENT(LogEvent::EKF_YAW_RESET);
         return;
     }
 
-    if (active_estimates_attitude_reset_count != active_estimates->attitude_reset_count) {
-        active_estimates_attitude_reset_count = active_estimates->attitude_reset_count;
-        attitude_reset_count++;
-    }
-    if (yaw_reset_tracker.update(active_estimates->yaw_reset_count,
-                                 active_estimates->yaw_reset_delta)) {
+    attitude_reset_tracker.update(active_estimates->attitude_reset_count);
+    if (yaw_reset_tracker.update(active_estimates->yaw_reset_count)) {
         LOGGER_WRITE_EVENT(LogEvent::EKF_YAW_RESET);
     }
-    position_NE_reset_tracker.update(active_estimates->position_NE_reset_count,
-                                     active_estimates->position_NE_reset_delta);
-    position_D_reset_tracker.update(active_estimates->position_D_reset_count,
-                                    active_estimates->position_D_reset_delta);
+    position_NE_reset_tracker.update(active_estimates->position_NE_reset_count);
+    position_D_reset_tracker.update(active_estimates->position_D_reset_count);
 }
 
 // update run at loop rate
@@ -772,7 +701,7 @@ float AP_AHRS::get_error_yaw(void) const
 float AP_AHRS::wind_alignment(const float heading_deg) const
 {
     Vector3f wind;
-    if (!wind_estimate(wind)) {
+    if (!get_wind(wind)) {
         return 0;
     }
     const float wind_heading_rad = atan2f(-wind.y, -wind.x);
@@ -784,8 +713,12 @@ float AP_AHRS::wind_alignment(const float heading_deg) const
  */
 float AP_AHRS::head_wind(void) const
 {
+    Vector3f wind;
+    // wind_alignment() has already returned zero if we have no valid
+    // estimate, so the validity of the wind vector is not checked here
+    IGNORE_RETURN(get_wind(wind));
     const float alignment = wind_alignment(get_yaw_deg());
-    return alignment * wind_estimate().xy().length();
+    return alignment * wind.xy().length();
 }
 
 /*
@@ -796,12 +729,14 @@ bool AP_AHRS::using_airspeed_sensor() const
     return state.airspeed_estimate_type == AirspeedEstimateType::AIRSPEED_SENSOR;
 }
 
+#if AP_AIRSPEED_ENABLED
 /*
     Return true if a airspeed sensor should be used for the AHRS airspeed estimate
  */
 bool AP_AHRS::_should_use_airspeed_sensor(uint8_t airspeed_index) const
 {
-    if (!airspeed_sensor_enabled(airspeed_index)) {
+    const auto *airspeed = AP::airspeed();
+    if (airspeed == nullptr || !airspeed->healthy(airspeed_index) || !airspeed->use(airspeed_index)) {
         return false;
     }
     nav_filter_status filter_status;
@@ -818,6 +753,7 @@ bool AP_AHRS::_should_use_airspeed_sensor(uint8_t airspeed_index) const
     }
     return true;
 }
+#endif  // AP_AIRSPEED_ENABLED
 
 // return an airspeed estimate if available. return true
 // if we have an estimate
@@ -860,20 +796,20 @@ bool AP_AHRS::_airspeed_EAS(float &airspeed_ret, AirspeedEstimateType &airspeed_
 #if AP_AHRS_DCM_ENABLED
     case EKFType::DCM:
         airspeed_estimate_type = AirspeedEstimateType::DCM_SYNTHETIC;
-        return dcm.airspeed_EAS(idx, airspeed_ret);
+        return dcm.airspeed_EAS(dcm_estimates.have_velocity_source, idx, airspeed_ret);
 #endif
 
 #if AP_AHRS_SIM_ENABLED
     case EKFType::SIM:
         airspeed_estimate_type = AirspeedEstimateType::SIM;
-        return sim.airspeed_EAS(airspeed_ret);
+        return sim.airspeed_EAS(sim_estimates.have_velocity_source, airspeed_ret);
 #endif
 
 #if HAL_NAVEKF2_AVAILABLE
     case EKFType::TWO:
 #if AP_AHRS_DCM_ENABLED
         airspeed_estimate_type = AirspeedEstimateType::DCM_SYNTHETIC;
-        return dcm.airspeed_EAS(idx, airspeed_ret);
+        return dcm.airspeed_EAS(dcm_estimates.have_velocity_source, idx, airspeed_ret);
 #else
         return false;
 #endif
@@ -890,7 +826,7 @@ bool AP_AHRS::_airspeed_EAS(float &airspeed_ret, AirspeedEstimateType &airspeed_
     case EKFType::EXTERNAL:
 #if AP_AHRS_DCM_ENABLED
         airspeed_estimate_type = AirspeedEstimateType::DCM_SYNTHETIC;
-        return dcm.airspeed_EAS(idx, airspeed_ret);
+        return dcm.airspeed_EAS(dcm_estimates.have_velocity_source, idx, airspeed_ret);
 #else
         return false;
 #endif
@@ -918,7 +854,7 @@ bool AP_AHRS::_airspeed_EAS(float &airspeed_ret, AirspeedEstimateType &airspeed_
 #if AP_AHRS_DCM_ENABLED
     // fallback to DCM
     airspeed_estimate_type = AirspeedEstimateType::DCM_SYNTHETIC;
-    return dcm.airspeed_EAS(idx, airspeed_ret);
+    return dcm.airspeed_EAS(dcm_estimates.have_velocity_source, idx, airspeed_ret);
 #endif
 
     return false;
@@ -929,7 +865,7 @@ bool AP_AHRS::_airspeed_TAS(float &airspeed_ret) const
     switch (active_EKF_type()) {
 #if AP_AHRS_DCM_ENABLED
     case EKFType::DCM:
-        return dcm.airspeed_TAS(airspeed_ret);
+        return dcm.airspeed_TAS(dcm_estimates.have_velocity_source, airspeed_ret);
 #endif
 #if HAL_NAVEKF2_AVAILABLE
     case EKFType::TWO:
@@ -1720,54 +1656,6 @@ void AP_AHRS::writeTerrainAMSL(float alt_amsl_m)
 #endif
 }
 
-/*
-  get gain factor for Z controllers
- */
-float AP_AHRS::getControlScaleZ(void) const
-{
-#if AP_AHRS_DCM_ENABLED
-    if (active_EKF_type() == EKFType::DCM) {
-        // when flying on DCM lower gains by 4x to cope with the high
-        // lag
-        return 0.25;
-    }
-#endif
-    return 1;
-}
-
-// get compass offset estimates
-// true if offsets are valid
-bool AP_AHRS::getMagOffsets(uint8_t mag_idx, Vector3f &magOffsets) const
-{
-    switch (configured_ekf_type()) {
-#if AP_AHRS_DCM_ENABLED
-    case EKFType::DCM:
-        return false;
-#endif
-#if HAL_NAVEKF2_AVAILABLE
-    case EKFType::TWO:
-        return ekf2.EKF2.getMagOffsets(mag_idx, magOffsets);
-#endif
-
-#if HAL_NAVEKF3_AVAILABLE
-    case EKFType::THREE:
-        return ekf3.EKF3.getMagOffsets(mag_idx, magOffsets);
-#endif
-
-#if AP_AHRS_SIM_ENABLED
-    case EKFType::SIM:
-        magOffsets.zero();
-        return true;
-#endif
-#if AP_AHRS_EXTERNAL_ENABLED
-    case EKFType::EXTERNAL:
-        return false;
-#endif
-    }
-    // since there is no default case above, this is unreachable
-    return false;
-}
-
 // Retrieves the NED delta velocity corrected
 bool AP_AHRS::_getCorrectedDeltaVelocityNED(Vector3f& ret, float& dt) const
 {
@@ -2042,10 +1930,7 @@ bool AP_AHRS::set_home(const Location &loc)
 
 #if AP_MISSION_ENABLED
     // Save home to mission
-    AP_Mission *mission = AP::mission();
-    if (mission != nullptr) {
-        mission->write_home_to_storage();
-    }
+    AP::mission().write_home_to_storage();
 #endif
 
     return true;
@@ -2063,41 +1948,6 @@ void AP_AHRS::load_watchdog_home()
         _home_locked = true;
         GCS_SEND_TEXT(MAV_SEVERITY_INFO, "Restored watchdog home");
     }
-}
-
-// get_hgt_ctrl_limit - get maximum height to be observed by the control loops in metres and a validity flag
-// this is used to limit height during optical flow navigation
-// it will return false when no limiting is required
-bool AP_AHRS::get_hgt_ctrl_limit(float& limit) const
-{
-    switch (active_EKF_type()) {
-#if AP_AHRS_DCM_ENABLED
-    case EKFType::DCM:
-        // We are not using an EKF so no limiting applies
-        return false;
-#endif
-
-#if HAL_NAVEKF2_AVAILABLE
-    case EKFType::TWO:
-        return ekf2.EKF2.getHeightControlLimit(limit);
-#endif
-
-#if HAL_NAVEKF3_AVAILABLE
-    case EKFType::THREE:
-        return ekf3.EKF3.getHeightControlLimit(limit);
-#endif
-
-#if AP_AHRS_SIM_ENABLED
-    case EKFType::SIM:
-        return false;
-#endif
-#if AP_AHRS_EXTERNAL_ENABLED
-    case EKFType::EXTERNAL:
-        return false;
-#endif
-    }
-
-    return false;
 }
 
 // Set to true if the terrain underneath is stable enough to be used as a height reference
@@ -2128,31 +1978,6 @@ void AP_AHRS::set_terrain_hgt_stable(bool stable)
 #if HAL_NAVEKF3_AVAILABLE
     ekf3.EKF3.setTerrainHgtStable(stable);
 #endif
-}
-
-// returns true when the state estimates are significantly degraded by vibration
-bool AP_AHRS::is_vibration_affected() const
-{
-    switch (configured_ekf_type()) {
-#if HAL_NAVEKF3_AVAILABLE
-    case EKFType::THREE:
-        return ekf3.EKF3.isVibrationAffected();
-#endif
-#if AP_AHRS_DCM_ENABLED
-    case EKFType::DCM:
-#endif
-#if HAL_NAVEKF2_AVAILABLE
-    case EKFType::TWO:
-#endif
-#if AP_AHRS_SIM_ENABLED
-    case EKFType::SIM:
-#endif
-#if AP_AHRS_EXTERNAL_ENABLED
-    case EKFType::EXTERNAL:
-#endif
-        return false;
-    }
-    return false;
 }
 
 // get 1-sigma position and velocity uncertainty from the EKF state error covariance matrix P
@@ -2232,6 +2057,21 @@ uint8_t AP_AHRS::get_active_airspeed_index() const
     return 0;
 #endif // AP_AIRSPEED_ENABLED
 }
+
+#if AP_AIRSPEED_ENABLED
+// returns true if airspeed sensor data is being consumed by the
+// active backend.  Note that this does *not* indicate the results
+// are derived from the airspeed data, just that the backend is
+// attempting to use the data
+bool AP_AHRS::airspeed_sensor_data_being_consumed(void) const
+{
+    // This is obviously a lie, we should be looking in the
+    // backend results to see if it truly is using the data.
+    const AP_Airspeed *_airspeed = AP::airspeed();
+    return _airspeed != nullptr && _airspeed->use() && _airspeed->healthy();
+}
+
+#endif  // AP_AIRSPEED_ENABLED
 
 #if AP_AHRS_EKF_RESET_ENABLED
 // request full backend reset, currently only implemented for EKF3
@@ -2366,7 +2206,7 @@ bool AP_AHRS::get_location(Location &loc) const
 }
 
 // return a wind estimation vector in "wind" (m/s); returns false on failure
-bool AP_AHRS::wind_estimate(Vector3f &wind) const
+bool AP_AHRS::get_wind(Vector3f &wind) const
 {
     wind = active_estimates->wind;
     return active_estimates->wind_valid;

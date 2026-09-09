@@ -55,21 +55,16 @@ void AP_AHRS_NavEKF3::update()
     // check the current primary core; if it has changed then assume
     // our attitude is reset:
     const int8_t primary_core = EKF3.getPrimaryCoreIndex();
-    if (old_primary_core != primary_core) {
-        old_primary_core = primary_core;
-        attitude_reset_count++;
+    if (attitude_reset_tracker.update(primary_core)) {
         LOGGER_WRITE_ERROR(LogErrorSubsystem::EKF_PRIMARY, LogErrorCode(primary_core));
         GCS_SEND_TEXT(MAV_SEVERITY_WARNING, "EKF3 primary changed:%d", (unsigned)primary_core);
     }
 
-    float yaw_delta;
-    yaw_reset_tracker.update(EKF3.getLastYawResetAngle(yaw_delta), yaw_delta);
+    yaw_reset_tracker.update(EKF3.getYawResetCount());
 
-    Vector2f pos_ne_delta;
-    position_NE_reset_tracker.update(EKF3.getLastPosNorthEastReset(pos_ne_delta), pos_ne_delta);
+    position_NE_reset_tracker.update(EKF3.getPosNorthEastResetCount());
 
-    float pos_d_delta;
-    position_D_reset_tracker.update(EKF3.getLastPosDownReset(pos_d_delta), pos_d_delta);
+    position_D_reset_tracker.update(EKF3.getPosDownResetCount());
 }
 
 void AP_AHRS_NavEKF3::get_results(AP_AHRS_Backend::Estimates &results)
@@ -121,10 +116,11 @@ void AP_AHRS_NavEKF3::get_results(AP_AHRS_Backend::Estimates &results)
 
     results.attitude_valid = started;
 
-    results.attitude_reset_count = attitude_reset_count;
+    results.attitude_reset_count = attitude_reset_tracker.count();
 
-    // copy results from the yaw reset tracker into results:
-    yaw_reset_tracker.get(results.yaw_reset_count, results.yaw_reset_delta);
+    results.yaw_reset_count = yaw_reset_tracker.count();
+
+    results.is_vibration_affected = EKF3.isVibrationAffected();
 
     /*
      * acceleration estimates
@@ -170,12 +166,10 @@ void AP_AHRS_NavEKF3::get_results(AP_AHRS_Backend::Estimates &results)
 
     // origin-relative position:
     results.position_NE_valid = EKF3.getPosNE(results.position_NE);
-    // copy results from the position_NE reset tracker into results:
-    position_NE_reset_tracker.get(results.position_NE_reset_count, results.position_NE_reset_delta);
+    results.position_NE_reset_count = position_NE_reset_tracker.count();
 
     results.position_D_valid = EKF3.getPosD(results.position_D);
-    // copy results from the position_D reset tracker into results:
-    position_D_reset_tracker.get(results.position_D_reset_count, results.position_D_reset_delta);
+    results.position_D_reset_count = position_D_reset_tracker.count();
 
     results.hagl_valid = EKF3.getHAGL(results.hagl);
 
@@ -223,6 +217,11 @@ void AP_AHRS_NavEKF3::get_results(AP_AHRS_Backend::Estimates &results)
     results.variances_valid = EKF3.getVariances(results.velVar, results.posVar, results.hgtVar, results.magVar, results.tasVar, offset);
 
     results.terrain_alt_variance_valid = EKF3.getTerrainAltVariance(results.terrain_alt_variance);
+
+    EKF3.getEkfControlLimits(results.control_ground_speed_limit_ms, results.control_gain_scaler_XY);
+    results.control_gain_scaler_Z = 1;
+
+    results.control_height_limit_valid = EKF3.getHeightControlLimit(results.control_height_limit_m);
 }
 
 bool AP_AHRS_NavEKF3::pre_arm_check(bool requires_position, char *failure_msg, uint8_t failure_msg_len) const

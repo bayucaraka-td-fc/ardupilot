@@ -9,6 +9,7 @@ Validates:
   - commit messages have a well-formed subsystem prefix before ':'
   - commit subject lines are <= 160 characters
   - changed markdown files pass markdownlint-cli2
+  - changed source files do not lose their trailing newline
 
 (new hwdef board README/image requirements are validated by test_new_boards.py)
 
@@ -27,7 +28,6 @@ import sys
 import urllib.error
 import urllib.request
 
-import allowed_subsystems
 import build_script_base
 
 DOCS_URL = "https://ardupilot.org/dev/docs/submitting-patches-back-to-master.html"
@@ -41,6 +41,14 @@ BLACKLISTED_PREFIXES = {
 }
 # spaces and quotes allowed to support Revert commits e.g. 'Revert "AP_Periph: ...'
 PREFIX_RE = re.compile(r'^[-A-Za-z0-9._/" ]+$')
+
+# extensions checked for a lost trailing newline
+SOURCE_EXTENSIONS = {
+    ".c", ".cc", ".cpp", ".cxx",
+    ".h", ".hh", ".hpp",
+    ".py",
+    ".lua",
+}
 
 # Enable colour when attached to a terminal or running under GitHub Actions
 _colour = sys.stdout.isatty() or os.environ.get('GITHUB_ACTIONS') == 'true'
@@ -105,10 +113,19 @@ class CheckBranchConventions(build_script_base.BuildScriptBase):
             if not line.strip():
                 continue
             # strip leading hash from --oneline format
-            subject = line.split(" ", 1)[1] if " " in line else line
+            sha, separator, subject = line.partition(" ")
+            if not separator:
+                sha, subject = "", line
             if ":" not in subject:
-                print(f"{FAIL} Commit is missing subsystem prefix: {line}")
-                print(f"       Reword to e.g. 'AP_Compass: {subject}'")
+                suggestion = self.subsystem_for_commit(sha) if sha else None
+                print(f"{FAIL} Commit message subject is missing its subsystem prefix: {line}")
+                print("       (this is about the git commit message, not the pull request title)")
+                if suggestion is not None:
+                    print(f"       Reword the commit message to: '{suggestion}: {subject}'")
+                else:
+                    print(f"       Reword the commit message to e.g. 'AP_Compass: {subject}'")
+                print("       Use 'git commit --amend' for the most recent commit, "
+                      "'git rebase -i' for an older one.")
                 print(f"       See: {DOCS_URL}")
                 ok = False
                 continue
@@ -131,10 +148,7 @@ class CheckBranchConventions(build_script_base.BuildScriptBase):
            - the declared prefix is in the allowed-subsystem list, and
            - every file changed in the commit belongs to that subsystem.
         '''
-        repo_root = self.run_git(
-            ['rev-parse', '--show-toplevel'], show_output=False,
-        ).strip()
-        subsystems = allowed_subsystems.AllowedSubsystems(repo_root)
+        subsystems = self.get_allowed_subsystems()
         commits_raw = self.run_git(
             ['log', f'{self.base_branch}..HEAD', '--reverse',
              '--pretty=format:%H %s'],
@@ -258,19 +272,6 @@ class CheckBranchConventions(build_script_base.BuildScriptBase):
                 if name in name_to_path:
                     result[name_to_path[name]] = parts[1]
         return result
-
-    def get_changed_paths_for_commit(self, commit: str) -> list:
-        '''return the list of paths changed in a single commit'''
-        output = self.run_git(
-            ['diff-tree', '--no-commit-id', '-r', '--name-only', commit],
-            show_output=False,
-        )
-        paths = []
-        for line in output.splitlines():
-            line = line.strip()
-            if line:
-                paths.append(line)
-        return paths
 
     def check_submodule_isolation(self) -> bool:
         '''check that each submodule update is isolated in its own commit'''
@@ -620,6 +621,73 @@ class CheckBranchConventions(build_script_base.BuildScriptBase):
 
         return all_board_ids_are_valid
 
+    def _blob_ends_with_newline(self, rev: str, path: str) -> bool | None:
+        '''return whether the blob rev:path ends with a newline byte;
+           None if the blob is missing or empty'''
+        result = subprocess.run(
+            ["git", "cat-file", "blob", f"{rev}:{path}"],
+            capture_output=True,
+        )
+        if result.returncode != 0:
+            return None
+        data = result.stdout
+        if not data:
+            return None
+        return data[-1:] in (b"\n", b"\r")
+
+    def check_trailing_newlines(self) -> bool:
+        '''check that no changed source file loses its trailing newline;
+           some editors strip the final newline by default, which shows up
+           as "No newline at end of file" noise in GitHub review.
+           Only files the PR adds or modifies are checked, and a modified
+           file is only flagged if the base version did end with a newline,
+           so pre-existing violations do not block unrelated edits.
+        '''
+        merge_base = self.run_git(
+            ["merge-base", self.base_branch, "HEAD"],
+            show_output=False,
+        ).strip()
+        name_status = self.run_git(
+            ["diff", "--name-status", "-M", f"{merge_base}..HEAD"],
+            show_output=False,
+        ).strip()
+
+        ok = True
+        for line in name_status.splitlines():
+            parts = line.split("\t")
+            status = parts[0]
+            if status.startswith("R") and len(parts) == 3:
+                old_path, new_path = parts[1], parts[2]
+            elif status in ("A", "M") and len(parts) == 2:
+                new_path = parts[1]
+                old_path = None if status == "A" else new_path
+            else:
+                # deletions, mode changes etc.
+                continue
+            if pathlib.Path(new_path).suffix.lower() not in SOURCE_EXTENSIONS:
+                continue
+
+            new_ends = self._blob_ends_with_newline("HEAD", new_path)
+            if new_ends is None or new_ends:
+                # empty file, or trailing newline present
+                continue
+
+            if old_path is not None:
+                if not self._blob_ends_with_newline(merge_base, old_path):
+                    # base version already lacked a trailing newline
+                    continue
+                print(f"{FAIL} {new_path} loses its trailing newline in this PR.")
+            else:
+                print(f"{FAIL} {new_path} is added without a trailing newline.")
+            ok = False
+
+        if ok:
+            print(f"{PASS} No changed source files lose their trailing newline.")
+        else:
+            print("       Configure your editor to end files with a newline "
+                  "(e.g. VSCode \"files.insertFinalNewline\": true).")
+        return ok
+
     # NOTE: checks concerning new hwdef boards (README.md presence, README
     # images, defaults.parm contents, and the board build itself) live in
     # test_new_boards.py, not here.  Add new-board-related checks there to keep
@@ -671,6 +739,7 @@ class CheckBranchConventions(build_script_base.BuildScriptBase):
             self.check_submodule_isolation(),
             self.check_submodule_references_exist(),
             self.check_board_ids(),
+            self.check_trailing_newlines(),
             self.check_markdown(),
             self.check_markdown_rst_hyperlinks(),
             self.check_markdown_rst_underlines(),
