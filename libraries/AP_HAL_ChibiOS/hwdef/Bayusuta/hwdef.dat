@@ -193,6 +193,7 @@ define HAL_COMPASS_AUTO_ROT_DEFAULT 2
 # CY15B104Q FRAM on SPI3 (params use first 32 KiB)
 define HAL_STORAGE_SIZE 32768
 define HAL_WITH_RAMTRON 1
+define HAL_RAMTRON_ALLOW_FALLBACK 0
 
 # build ABIN for flash-from-SD support
 env BUILD_ABIN True
