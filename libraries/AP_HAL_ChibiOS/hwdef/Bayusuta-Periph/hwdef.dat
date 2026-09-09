@@ -112,11 +112,28 @@ define GPS_MAX_INSTANCES 1
 # ---------------- compass ----------------
 define AP_PERIPH_MAG_ENABLED 1
 define AP_COMPASS_IIS2MDC_ENABLED 1
-# TODO: rotation is a placeholder until PCB layout orientation is known
-COMPASS IIS2MDC I2C:0:0x1E false ROTATION_NONE
+COMPASS IIS2MDC I2C:0:0x1E false ROTATION_YAW_270
 define HAL_COMPASS_MAX_SENSORS 1
 # IIS2MDC INT/DRDY on PA7 is not used by the driver
 
 # ---------------- temperature (SHT31) ----------------
 define AP_PERIPH_DEVICE_TEMPERATURE_ENABLED 1
 define AP_TEMPERATURE_SENSOR_ENABLED 1
+
+# ---------------- debug aids (bring-up only) ----------------
+# Both are off by default for periph builds (defaults_periph.h:12, :497).
+# Enabled here to make the node diagnosable during CAN bring-up; remove for
+# production if flash/RAM is ever needed (currently ~807 KB flash free).
+# Pattern from CubeOrange-periph-heavy/hwdef.dat:18,34 and CubeNode:86.
+#
+# MAVLink on the native USB port, so a GCS can read this node directly.
+define HAL_GCS_ENABLED 1
+# SLCAN, so a GCS can watch the CAN bus from this node's side.
+# NOTE: AP_Periph auto-assigns SLCAN to the LAST serial port if no port has
+# the SLCAN protocol (Tools/AP_Periph/can.cpp:1724-1727). With 4 ports that
+# would be SERIAL3 = USART1 = the GPS UART, so defaults.parm pins SLCAN to
+# SERIAL0 (native USB) instead to keep the GPS port free. SERIAL0 carries
+# either SLCAN or MAVLink, not both - see defaults.parm.
+define AP_CAN_SLCAN_ENABLED 1
+# let uploader.py reboot the node over serial
+define HAL_PERIPH_LISTEN_FOR_SERIAL_UART_REBOOT_CMD_PORT 0

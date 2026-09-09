@@ -173,10 +173,8 @@ DMA_NOSHARE SPI1* SPI4* TIM4*
 DMA_PRIORITY TIM4* S*
 
 # ---------------- IMUs ----------------
-# TODO: rotations are placeholders until PCB layout orientation is known.
-# Confirm both rotations against the physical board before flight!
-IMU Invensensev3 SPI:icm42688 ROTATION_NONE
-IMU BMI088 SPI:bmi088_a SPI:bmi088_g ROTATION_NONE
+IMU Invensensev3 SPI:icm42688 ROTATION_ROLL_180_YAW_90
+IMU BMI088 SPI:bmi088_a SPI:bmi088_g ROTATION_ROLL_180_YAW_90
 define HAL_DEFAULT_INS_FAST_SAMPLE 1
 
 # ---------------- barometers ----------------

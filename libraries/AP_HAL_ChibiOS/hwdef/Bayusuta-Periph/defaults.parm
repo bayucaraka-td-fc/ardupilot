@@ -3,6 +3,14 @@
 # GPS on port 3 (USART1, see SERIAL_ORDER in hwdef.dat)
 GPS_PORT 3
 
+# SLCAN on SERIAL0 (native USB, the only reachable port on this board -
+# the CH330N on USART3 is not populated). Baud is irrelevant on USB CDC.
+# Pinning SLCAN to a port also stops AP_Periph auto-assigning it to the
+# last port, which would be SERIAL3 = USART1 = the GPS UART.
+# Bring-up aid: set to 2 (MAVLink2) instead if you want a GCS connection,
+# but then also set SERIAL2_PROTOCOL 22 to keep SLCAN off the GPS port.
+SERIAL0_PROTOCOL 22
+
 # SHT31 temperature sensor on internal I2C bus, published over DroneCAN
 TEMP1_TYPE 8
 TEMP1_BUS 0
